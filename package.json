@@ -1,0 +1,41 @@
+{
+  "name": "obsidian-slack-flavor",
+  "version": "0.1.0",
+  "description": "Write and preview Slack mrkdwn in Obsidian, render your workspace's custom emoji, import Slack threads, and copy notes as Slack-ready text.",
+  "license": "MIT",
+  "author": "Yuto Takagi",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yut0takagi/obsidian-slack-flavor.git"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "slack",
+    "mrkdwn",
+    "emoji"
+  ],
+  "private": true,
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "gen:emoji": "node scripts/gen-standard-emoji.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc --noEmit -p . && vitest run && node esbuild.config.mjs production"
+  },
+  "devDependencies": {
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.38.6",
+    "@types/node": "^26.6.3",
+    "emoji-datasource": "^16.0.0",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^20.14.5",
+    "obsidian": "^1.13.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  },
+  "homepage": "https://github.com/yut0takagi/obsidian-slack-flavor#readme",
+  "bugs": "https://github.com/yut0takagi/obsidian-slack-flavor/issues"
+}

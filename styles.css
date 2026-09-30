@@ -1,0 +1,376 @@
+/* Slack Flavor — Slack-looking messages on top of Obsidian's theme variables. */
+
+body,
+.theme-light {
+  --sf-link: #1264a3;
+  --sf-code-fg: #e01e5a;
+  --sf-subtle-bg: rgba(29, 28, 29, 0.04);
+  --sf-subtle-border: rgba(29, 28, 29, 0.13);
+  --sf-quote-bar: rgba(29, 28, 29, 0.3);
+  --sf-mention-bg: rgba(29, 155, 209, 0.1);
+  --sf-mention-fg: #1264a3;
+  --sf-special-bg: rgba(242, 199, 68, 0.4);
+  --sf-reaction-bg: rgba(29, 28, 29, 0.06);
+  --sf-emoji-size: 1.375em;
+  --sf-jumbo-size: 32px;
+}
+
+.theme-dark {
+  --sf-link: #1d9bd1;
+  --sf-code-fg: #e8912d;
+  --sf-subtle-bg: rgba(232, 232, 232, 0.04);
+  --sf-subtle-border: rgba(232, 232, 232, 0.13);
+  --sf-quote-bar: rgba(232, 232, 232, 0.3);
+  --sf-mention-bg: rgba(29, 155, 209, 0.1);
+  --sf-mention-fg: #1d9bd1;
+  --sf-special-bg: rgba(242, 199, 68, 0.3);
+  --sf-reaction-bg: rgba(232, 232, 232, 0.08);
+}
+
+/* ---------- block frame ---------- */
+
+.sf-block {
+  position: relative;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  font-family: var(--font-interface);
+  font-size: 15px;
+  line-height: 1.4667;
+  color: var(--text-normal);
+  overflow: hidden;
+}
+
+.sf-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.sf-channel {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.sf-title {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.sf-workspace {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.sf-text {
+  padding: 10px 16px;
+}
+
+.sf-messages {
+  padding: 8px 0;
+}
+
+/* ---------- messages ---------- */
+
+.sf-message {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  padding: 8px 20px;
+}
+
+.sf-message:hover {
+  background: var(--background-modifier-hover);
+}
+
+.sf-message.sf-continued {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.sf-avatar {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1;
+  user-select: none;
+}
+
+.sf-avatar-c0 { background: #e8912d; }
+.sf-avatar-c1 { background: #2bac76; }
+.sf-avatar-c2 { background: #1264a3; }
+.sf-avatar-c3 { background: #e01e5a; }
+.sf-avatar-c4 { background: #7c3085; }
+.sf-avatar-c5 { background: #36c5f0; }
+.sf-avatar-c6 { background: #ecb22e; }
+.sf-avatar-c7 { background: #4a154b; }
+
+.sf-gutter-time {
+  flex: 0 0 36px;
+  text-align: right;
+  font-size: 11px;
+  line-height: 22px;
+  color: var(--text-faint);
+  visibility: hidden;
+}
+
+.sf-message:hover > .sf-gutter-time {
+  visibility: visible;
+}
+
+.sf-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.sf-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sf-author {
+  font-weight: 900;
+  font-size: 15px;
+}
+
+.sf-time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sf-body {
+  overflow-wrap: anywhere;
+}
+
+.sf-body.sf-jumbo .sf-emoji {
+  width: var(--sf-jumbo-size);
+  height: var(--sf-jumbo-size);
+  font-size: var(--sf-jumbo-size);
+}
+
+.sf-date-divider {
+  display: flex;
+  align-items: center;
+  margin: 8px 0;
+  color: var(--text-normal);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sf-date-divider::before,
+.sf-date-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.sf-date-divider span {
+  padding: 2px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 24px;
+  background: var(--background-primary);
+}
+
+/* ---------- mrkdwn ---------- */
+
+.sf-p {
+  white-space: pre-wrap;
+  min-height: 1.4667em;
+}
+
+.sf-block b {
+  font-weight: 700;
+}
+
+.sf-quote {
+  margin: 4px 0;
+  padding: 0 0 0 12px;
+  border-left: 4px solid var(--sf-quote-bar);
+  color: inherit;
+  font-style: normal;
+}
+
+.sf-code {
+  padding: 2px 3px 1px;
+  border: 1px solid var(--sf-subtle-border);
+  border-radius: 3px;
+  background: var(--sf-subtle-bg);
+  color: var(--sf-code-fg);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+}
+
+.sf-pre {
+  margin: 4px 0;
+  padding: 8px;
+  border: 1px solid var(--sf-subtle-border);
+  border-radius: 4px;
+  background: var(--sf-subtle-bg);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.sf-pre code {
+  background: none;
+  padding: 0;
+  color: var(--text-normal);
+}
+
+.sf-link,
+.sf-block a.sf-link {
+  color: var(--sf-link);
+  text-decoration: none;
+}
+
+.sf-link:hover {
+  text-decoration: underline;
+}
+
+.sf-mention {
+  padding: 0 2px 1px;
+  border-radius: 3px;
+  background: var(--sf-mention-bg);
+  color: var(--sf-mention-fg);
+}
+
+.sf-mention-special {
+  background: var(--sf-special-bg);
+  color: var(--text-normal);
+}
+
+/* ---------- emoji (also used in regular notes) ---------- */
+
+img.sf-emoji {
+  display: inline-block;
+  width: var(--sf-emoji-size);
+  height: var(--sf-emoji-size);
+  margin: 0 0.05em;
+  vertical-align: -0.3em;
+  object-fit: contain;
+  border: none;
+  box-shadow: none;
+}
+
+.sf-emoji-unicode {
+  font-size: 1.15em;
+  line-height: 1;
+}
+
+.markdown-rendered img.sf-emoji,
+.cm-content img.sf-emoji {
+  cursor: default;
+}
+
+/* ---------- reactions & threads ---------- */
+
+.sf-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.sf-reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px 0 6px;
+  border-radius: 24px;
+  background: var(--sf-reaction-bg);
+  font-size: 12px;
+}
+
+.sf-reaction .sf-emoji {
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  vertical-align: middle;
+}
+
+.sf-reaction-count {
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.sf-thread {
+  margin-top: 6px;
+}
+
+.sf-thread-summary {
+  color: var(--sf-link);
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.sf-message.sf-reply {
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--background-modifier-border);
+}
+
+.sf-message.sf-reply:hover {
+  background: none;
+}
+
+.sf-reply .sf-avatar {
+  flex-basis: 24px;
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+/* ---------- copy button ---------- */
+
+.sf-copy {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.sf-block:hover > .sf-copy,
+.sf-message:hover > .sf-copy {
+  opacity: 1;
+}
+
+/* ---------- suggest / settings ---------- */
+
+.sf-suggest-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sf-suggest-item .sf-emoji {
+  width: 20px;
+  height: 20px;
+  font-size: 18px;
+  vertical-align: middle;
+}
+
+.sf-muted {
+  color: var(--text-muted);
+}
+
+.sf-import-link {
+  width: 100%;
+  min-width: 280px;
+}
