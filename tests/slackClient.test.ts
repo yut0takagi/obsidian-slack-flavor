@@ -48,9 +48,9 @@ const ok = (json: object): HttpResponse => ({ status: 200, headers: {}, json: { 
 
 describe("SlackClient", () => {
   it("posts form-encoded params with a bearer token", async () => {
-    const { http, calls } = fakeHttp([ok({ team: "CA", team_id: "T1", url: "https://ca.slack.com/", user_id: "U1" })]);
+    const { http, calls } = fakeHttp([ok({ team: "Example", team_id: "T1", url: "https://example.slack.com/", user_id: "U1" })]);
     const client = new SlackClient("xoxp-test", http);
-    await expect(client.authTest()).resolves.toMatchObject({ team: "CA", url: "https://ca.slack.com/" });
+    await expect(client.authTest()).resolves.toMatchObject({ team: "Example", url: "https://example.slack.com/" });
     expect(calls[0]).toEqual({
       url: "https://slack.com/api/auth.test",
       method: "POST",
