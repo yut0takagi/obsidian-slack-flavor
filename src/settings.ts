@@ -20,6 +20,8 @@ export interface SlackFlavorSettings {
   renderEmojiInNotes: boolean;
   /** Pad converted markers with spaces so Slack formats them next to Japanese. */
   spaceAroundMarkers: boolean;
+  /** Refetch a workspace's emoji list at startup once it is this many days old; 0 turns it off. */
+  emojiRefreshDays: number;
 }
 
 export const DEFAULT_SETTINGS: SlackFlavorSettings = {
@@ -28,6 +30,7 @@ export const DEFAULT_SETTINGS: SlackFlavorSettings = {
   strictBoundaries: true,
   renderEmojiInNotes: true,
   spaceAroundMarkers: true,
+  emojiRefreshDays: 7,
 };
 
 /** Frontmatter property that picks the workspace for a note. */
