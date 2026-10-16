@@ -1,3 +1,4 @@
+import type { SlackBlock, SlackBlockMeta, SlackMessage } from "../block/parse";
 import type { SlackApiMessage } from "./client";
 
 export interface ThreadToBlockDeps {
@@ -18,22 +19,55 @@ const CHANNEL_MENTION = /<#([CG][A-Z0-9]+)>/g;
 
 /** Converts a thread from conversations.replies into a fenced ```slack block. */
 export async function threadToBlock(messages: SlackApiMessage[], deps: ThreadToBlockDeps): Promise<string> {
-  const lines: string[] = [];
-  if (deps.workspace) lines.push(`workspace: ${deps.workspace}`);
-  if (deps.channel) lines.push(`channel: #${deps.channel.replace(/^#/, "")}`);
-  if (deps.title) lines.push(`title: ${deps.title}`);
-  if (deps.source) lines.push(`source: ${deps.source}`);
+  return formatSlackBlock(await threadToSlackBlock(messages, deps));
+}
+
+/** The thread as a parsed block (replies nested under their parent), shared by the block and Markdown outputs. */
+export async function threadToSlackBlock(messages: SlackApiMessage[], deps: ThreadToBlockDeps): Promise<SlackBlock> {
+  const meta: SlackBlockMeta = {};
+  if (deps.workspace) meta.workspace = deps.workspace;
+  if (deps.channel) meta.channel = `#${deps.channel.replace(/^#/, "")}`;
+  if (deps.title) meta.title = deps.title;
+  if (deps.source) meta.source = deps.source;
 
   const rootTs = messages[0]?.thread_ts ?? messages[0]?.ts;
+  const out: SlackMessage[] = [];
   for (const msg of messages) {
-    if (lines.length) lines.push("");
     const reply = msg.ts !== rootTs && msg.thread_ts === rootTs;
-    lines.push(`${reply ? "↳ " : ""}@${await authorOf(msg, deps)} ${formatTs(msg.ts, deps.timeZone)}`);
-    const body = await resolveMentions(msg.text ?? "", deps);
-    if (body) lines.push(body);
-    for (const f of msg.files ?? []) lines.push(`📎 <${f.permalink}|${f.title || f.name || "file"}>`);
-    if (msg.reactions?.length) lines.push(`+${msg.reactions.map((r) => `:${r.name}: ${r.count}`).join(" ")}`);
+    const body = [await resolveMentions(msg.text ?? "", deps)];
+    for (const f of msg.files ?? []) body.push(`📎 <${f.permalink}|${f.title || f.name || "file"}>`);
+    const message: SlackMessage = {
+      author: await authorOf(msg, deps),
+      time: formatTs(msg.ts, deps.timeZone),
+      body: body.filter(Boolean).join("\n"),
+      reactions: (msg.reactions ?? []).map((r) => ({ emoji: `:${r.name}:`, count: r.count })),
+      replies: [],
+    };
+    const parent = out[out.length - 1];
+    if (reply && parent) parent.replies.push(message);
+    else out.push(message);
   }
+  return { meta, text: "", messages: out };
+}
+
+/** Writes a block in the ```slack format that parseSlackBlock reads. */
+export function formatSlackBlock(block: SlackBlock): string {
+  const lines: string[] = [];
+  for (const key of ["workspace", "channel", "title", "source"] as const) {
+    if (block.meta[key]) lines.push(`${key}: ${block.meta[key]}`);
+  }
+  if (block.text) {
+    if (lines.length) lines.push("");
+    lines.push(block.text);
+  }
+  const write = (msg: SlackMessage, reply: boolean) => {
+    if (lines.length) lines.push("");
+    lines.push(`${reply ? "↳ " : ""}@${msg.author}${msg.time ? ` ${msg.time}` : ""}`);
+    if (msg.body) lines.push(msg.body);
+    if (msg.reactions.length) lines.push(`+${msg.reactions.map((r) => `${r.emoji} ${r.count}`).join(" ")}`);
+    for (const r of msg.replies) write(r, true);
+  };
+  for (const msg of block.messages) write(msg, false);
 
   const content = lines.join("\n");
   const fence = "`".repeat(Math.max(3, longestBacktickRun(content) + 1));
