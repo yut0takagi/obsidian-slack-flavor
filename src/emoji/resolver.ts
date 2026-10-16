@@ -37,6 +37,14 @@ function resolveAs(requested: string, name: string, custom: CustomEmojiMap | und
   return { kind: "unicode", name: requested, char: withSkinTone(char, skinTone) };
 }
 
+/** Wraps a resolver so custom emoji point somewhere else, e.g. at a locally cached copy of the image. */
+export function withImageUrl(resolve: EmojiResolver, mapUrl: (url: string) => string): EmojiResolver {
+  return (name, skinTone) => {
+    const emoji = resolve(name, skinTone);
+    return emoji?.kind === "custom" ? { ...emoji, url: mapUrl(emoji.url) } : emoji;
+  };
+}
+
 function withSkinTone(char: string, skinTone: number | undefined): string {
   if (skinTone === undefined || skinTone < 2 || skinTone > 6) return char;
   return SKINS[char]?.[skinTone - 2] ?? char;
