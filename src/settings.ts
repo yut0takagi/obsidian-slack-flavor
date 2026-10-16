@@ -12,6 +12,9 @@ export interface WorkspaceConfig {
   emojiFetchedAt?: number;
 }
 
+/** How "Import Slack thread" inserts a thread: a ```slack block, or a Markdown callout. */
+export type ImportFormat = "block" | "markdown";
+
 export interface SlackFlavorSettings {
   workspaces: WorkspaceConfig[];
   defaultWorkspace: string | null;
@@ -24,6 +27,7 @@ export interface SlackFlavorSettings {
   emojiRefreshDays: number;
   /** Size limit for locally cached emoji images; 0 turns the cache off. */
   emojiCacheMB: number;
+  importFormat: ImportFormat;
 }
 
 export const DEFAULT_SETTINGS: SlackFlavorSettings = {
@@ -34,6 +38,7 @@ export const DEFAULT_SETTINGS: SlackFlavorSettings = {
   spaceAroundMarkers: true,
   emojiRefreshDays: 7,
   emojiCacheMB: 50,
+  importFormat: "block",
 };
 
 /** Frontmatter property that picks the workspace for a note. */

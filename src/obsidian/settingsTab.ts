@@ -1,6 +1,9 @@
-import { PluginSettingTab, SecretComponent, Setting } from "obsidian";
+import { Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import { newWorkspaceId, type WorkspaceConfig } from "../settings";
 import type SlackFlavorPlugin from "../../main";
+
+const REFRESH_DAYS = [0, 1, 3, 7, 14, 30];
+const CACHE_MB = [0, 10, 50, 100, 200];
 
 export class SlackFlavorSettingTab extends PluginSettingTab {
   constructor(private readonly plugin: SlackFlavorPlugin) {
@@ -39,12 +42,73 @@ export class SlackFlavorSettingTab extends PluginSettingTab {
         });
     }
 
+    new Setting(containerEl)
+      .setName(s.settingsRefreshDays)
+      .setDesc(s.settingsRefreshDaysDesc)
+      .addDropdown((dd) => {
+        for (const n of withCurrent(REFRESH_DAYS, plugin.settings.emojiRefreshDays)) dd.addOption(String(n), n ? s.settingsEveryDays(n) : s.settingsOff);
+        dd.setValue(String(plugin.settings.emojiRefreshDays)).onChange(async (value) => {
+          plugin.settings.emojiRefreshDays = Number(value);
+          await plugin.saveSettings();
+        });
+      });
+
     new Setting(containerEl).setName(s.settingsRendering).setHeading();
     this.toggle(s.settingsStrict, s.settingsStrictDesc, "strictBoundaries");
     this.toggle(s.settingsNoteEmoji, s.settingsNoteEmojiDesc, "renderEmojiInNotes");
+    this.cacheSetting();
 
     new Setting(containerEl).setName(s.settingsConvert).setHeading();
     this.toggle(s.settingsPad, s.settingsPadDesc, "spaceAroundMarkers");
+
+    new Setting(containerEl).setName(s.settingsImport).setHeading();
+    new Setting(containerEl)
+      .setName(s.settingsImportFormat)
+      .setDesc(s.settingsImportFormatDesc)
+      .addDropdown((dd) =>
+        dd
+          .addOption("block", s.importFormatBlock)
+          .addOption("markdown", s.importFormatMarkdown)
+          .setValue(plugin.settings.importFormat)
+          .onChange(async (value) => {
+            plugin.settings.importFormat = value === "markdown" ? "markdown" : "block";
+            await plugin.saveSettings();
+          }),
+      );
+  }
+
+  private cacheSetting(): void {
+    const { containerEl, plugin } = this;
+    const s = plugin.strings;
+    const cache = plugin.imageCache;
+    const describe = () => {
+      const { files, bytes } = cache.usage();
+      return s.settingsCacheDesc(files, `${(bytes / 1024 / 1024).toFixed(1)} MB`);
+    };
+    const setting = new Setting(containerEl)
+      .setName(s.settingsCache)
+      .setDesc(describe())
+      .addDropdown((dd) => {
+        for (const mb of withCurrent(CACHE_MB, plugin.settings.emojiCacheMB)) dd.addOption(String(mb), mb ? `${mb} MB` : s.settingsOff);
+        dd.setValue(String(plugin.settings.emojiCacheMB)).onChange(async (value) => {
+          plugin.settings.emojiCacheMB = Number(value);
+          await plugin.saveSettings();
+          await cache.enforceLimit();
+          plugin.refreshViews();
+          setting.setDesc(describe());
+        });
+      })
+      .addButton((btn) =>
+        btn.setButtonText(s.settingsCacheClear).onClick(async () => {
+          await cache.clear();
+          // Rendered emoji may point at the deleted files; redraw them from Slack's URLs.
+          plugin.refreshViews();
+          setting.setDesc(describe());
+          new Notice(s.cacheCleared);
+        }),
+      );
+    // File sizes are read in the background after startup.
+    void cache.idle().then(() => setting.setDesc(describe()));
   }
 
   private workspaceSettings(w: WorkspaceConfig): void {
@@ -107,4 +171,9 @@ export class SlackFlavorSettingTab extends PluginSettingTab {
         }),
       );
   }
+}
+
+/** The preset choices, plus the saved value when it was set to something else (e.g. by editing data.json). */
+function withCurrent(choices: number[], current: number): number[] {
+  return choices.includes(current) || !Number.isFinite(current) ? choices : [...choices, current].sort((a, b) => a - b);
 }

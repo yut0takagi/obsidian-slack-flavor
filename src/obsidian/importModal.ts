@@ -1,21 +1,23 @@
 import { Modal, Setting } from "obsidian";
-import { findWorkspace, type WorkspaceConfig } from "../settings";
+import { findWorkspace, type ImportFormat, type WorkspaceConfig } from "../settings";
 import { parsePermalink } from "../slack/permalink";
 import type SlackFlavorPlugin from "../../main";
 
-/** Asks for a message link and a workspace; the workspace follows the link's domain when it is registered. */
+/** Asks for a message link, a workspace and the format; the workspace follows the link's domain when it is registered. */
 export class ImportModal extends Modal {
   private link = "";
   private workspace: WorkspaceConfig;
+  private format: ImportFormat;
   private busy = false;
 
   constructor(
     private readonly plugin: SlackFlavorPlugin,
     preferred: WorkspaceConfig | undefined,
-    private readonly onSubmit: (link: string, workspace: WorkspaceConfig) => Promise<boolean>,
+    private readonly onSubmit: (link: string, workspace: WorkspaceConfig, format: ImportFormat) => Promise<boolean>,
   ) {
     super(plugin.app);
     this.workspace = preferred ?? plugin.settings.workspaces[0];
+    this.format = plugin.settings.importFormat;
   }
 
   override onOpen(): void {
@@ -48,6 +50,16 @@ export class ImportModal extends Modal {
       select = dd.selectEl;
     });
 
+    new Setting(this.contentEl).setName(s.importFormat).addDropdown((dd) =>
+      dd
+        .addOption("block", s.importFormatBlock)
+        .addOption("markdown", s.importFormatMarkdown)
+        .setValue(this.format)
+        .onChange((value) => {
+          this.format = value === "markdown" ? "markdown" : "block";
+        }),
+    );
+
     let button: HTMLButtonElement | undefined;
     new Setting(this.contentEl).addButton((btn) => {
       btn.setButtonText(s.importButton).setCta().onClick(() => this.submit(btn.buttonEl));
@@ -65,7 +77,7 @@ export class ImportModal extends Modal {
     if (this.busy) return;
     this.busy = true;
     button.disabled = true;
-    const ok = await this.onSubmit(this.link, this.workspace);
+    const ok = await this.onSubmit(this.link, this.workspace, this.format);
     this.busy = false;
     button.disabled = false;
     if (ok) this.close();
