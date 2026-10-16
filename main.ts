@@ -1,5 +1,5 @@
 import { type Editor, getLanguage, MarkdownView, Notice, Plugin, type TFile } from "obsidian";
-import { findSlackBlocks, pickBlock } from "./src/block/locate";
+import { blockAt, findSlackBlocks } from "./src/block/locate";
 import { parseSlackBlock } from "./src/block/parse";
 import { renderSlackBlock } from "./src/block/render";
 import { slackClipboardData } from "./src/convert/clipboardData";
@@ -11,6 +11,7 @@ import { createStrings, type Strings } from "./src/i18n";
 import { emojiLivePreview } from "./src/obsidian/livePreview";
 import { EmojiSuggest } from "./src/obsidian/emojiSuggest";
 import { browserClipboardWriters, copyWithFallback } from "./src/obsidian/clipboard";
+import { confirmRefresh } from "./src/obsidian/confirmRefreshModal";
 import { obsidianHttp, obsidianImageFetch } from "./src/obsidian/http";
 import { ImportModal } from "./src/obsidian/importModal";
 import { renderNoteEmoji } from "./src/obsidian/readingView";
@@ -27,6 +28,7 @@ import {
 import { SlackApiError, SlackClient } from "./src/slack/client";
 import { describeError } from "./src/slack/errors";
 import { parsePermalink, threadPermalink } from "./src/slack/permalink";
+import { checkRefreshSource, refreshSummary } from "./src/slack/refresh";
 import { formatSlackBlock, threadToBlock, threadToSlackBlock } from "./src/slack/toBlock";
 import { EmojiStore } from "./src/store/emojiStore";
 import { EmojiImageCache } from "./src/store/imageCache";
@@ -259,11 +261,16 @@ export default class SlackFlavorPlugin extends Plugin {
     }).open();
   }
 
-  /** Re-reads the thread a block was imported from and replaces the block with the current replies and reactions. */
+  /**
+   * Re-reads the thread a block was imported from and replaces the block with the current replies and
+   * reactions. The block is note text that others may have written (shared or synced vaults), so only
+   * the block under the cursor is used, its link must be on the token's own workspace, and the user
+   * confirms the workspace, channel and thread before anything is read.
+   */
   private async refreshThread(editor: Editor, file: TFile | null): Promise<void> {
     const s = this.strings;
     const lines = editor.getValue().split("\n");
-    const target = pickBlock(findSlackBlocks(lines), editor.getCursor().line, (b) => !!parseSlackBlock(b.content).meta.source);
+    const target = blockAt(findSlackBlocks(lines), editor.getCursor().line);
     if (!target) {
       new Notice(s.noBlockHere);
       return;
@@ -280,20 +287,29 @@ export default class SlackFlavorPlugin extends Plugin {
       new Notice(s.noWorkspace);
       return;
     }
+    const check = checkRefreshSource(permalink, workspace);
+    if (!check.ok) {
+      new Notice(check.reason === "unknown-domain" ? s.refreshUnknownDomain(workspace.name) : s.refreshOtherWorkspace(check.host, workspace.name));
+      return;
+    }
     const token = this.tokenFor(workspace);
     if (!token) {
       new Notice(s.noToken(workspace.name));
       return;
     }
 
+    const client = new SlackClient(token, obsidianHttp);
+    // Only the channel's name is looked up before the user agrees; it is shown in the dialog, not written anywhere.
+    const channelName = await client.channelName(permalink.channel);
+    if (!(await confirmRefresh(this.app, s, refreshSummary(workspace, permalink, channelName)))) return;
+
     const notice = new Notice(s.refreshing, 0);
     try {
-      const client = new SlackClient(token, obsidianHttp);
       const messages = await client.replies(permalink.channel, permalink.threadTs ?? permalink.ts);
       const fresh = await threadToBlock(messages, {
         userName: (id) => client.userName(id),
         channelName: (id) => client.channelName(id),
-        channel: (await client.channelName(permalink.channel)) ?? meta.channel,
+        channel: channelName ?? meta.channel,
         workspace: meta.workspace,
         title: meta.title,
         source: meta.source,

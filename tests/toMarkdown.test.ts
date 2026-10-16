@@ -24,6 +24,18 @@ describe("mrkdwnToMarkdown", () => {
     );
   });
 
+  it("keeps emoji codes that are valid Slack names, including non-ASCII ones", () => {
+    expect(mrkdwnToMarkdown(":承知: :t-rex: :+1: :-1: :white_check_mark: :ok_hand::skin-tone-3:")).toBe(
+      ":承知: :t-rex: :+1: :-1: :white_check_mark: :ok_hand::skin-tone-3:",
+    );
+  });
+
+  it("escapes emoji-looking codes whose name Slack would not allow", () => {
+    expect(mrkdwnToMarkdown(":![[秘密のノート]]: と :%%: と :a$b: と :#tag:")).toBe(
+      ":!\\[\\[秘密のノート\\]\\]: と :\\%\\%: と :a\\$b: と :\\#tag:",
+    );
+  });
+
   it("escapes characters that would format in Obsidian but are plain in Slack", () => {
     expect(mrkdwnToMarkdown("これは*太字*です 2*3 [x] # ==y== %%c%% $5 a|b x^2 <b>")).toBe(
       "これは\\*太字\\*です 2\\*3 \\[x\\] \\# \\=\\=y\\=\\= \\%\\%c\\%\\% \\$5 a\\|b x\\^2 \\<b>",

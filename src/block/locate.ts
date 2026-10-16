@@ -33,14 +33,10 @@ function isClosing(line: string, marker: string): boolean {
   return !!m && m[1][0] === marker[0] && m[1].length >= marker.length;
 }
 
-/** The block under the cursor line, or the note's only `refreshable` block when the cursor is elsewhere. */
-export function pickBlock(
-  blocks: SlackBlockRange[],
-  line: number,
-  refreshable: (block: SlackBlockRange) => boolean,
-): SlackBlockRange | undefined {
-  const under = blocks.find((b) => line >= b.start && line <= b.end);
-  if (under) return under;
-  const candidates = blocks.filter(refreshable);
-  return candidates.length === 1 ? candidates[0] : undefined;
+/**
+ * The block under the cursor line. There is deliberately no "nearest" or "only block" fallback:
+ * refreshing reads Slack with the user's token, so it must only act on a block the user pointed at.
+ */
+export function blockAt(blocks: SlackBlockRange[], line: number): SlackBlockRange | undefined {
+  return blocks.find((b) => line >= b.start && line <= b.end);
 }

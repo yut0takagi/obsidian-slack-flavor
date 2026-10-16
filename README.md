@@ -135,7 +135,7 @@ In Slack, choose **Copy link** on a message or a reply, then run **Import Slack 
 - **Slack block**: a `slack` block that looks like Slack, with a `source:` line linking the thread.
 - **Markdown (callout)**: an ordinary `> [!quote]` callout with each message's author and time in bold, Slack formatting converted to Markdown and the channel linked to the thread. It reads fine in any Markdown app; custom emoji in it use the note's workspace.
 
-To update an imported block with new replies and reactions, put the cursor in it and run **Refresh Slack thread in block** (if the note has only one imported block, the cursor can be anywhere). The block is rewritten from Slack, keeping its `workspace:` and `title:` lines; anything else you edited inside it is replaced. Blocks imported before 0.2.0 have no `source:` line; import them again to make them refreshable.
+To update an imported block with new replies and reactions, put the cursor inside it and run **Refresh Slack thread in block**. The plugin first shows the workspace, channel and thread date it is about to read and only fetches after you confirm; a block whose `source:` link is not on the selected workspace's domain is refused. The block is rewritten from Slack, keeping its `workspace:` and `title:` lines; anything else you edited inside it is replaced. Blocks imported before 0.2.0 have no `source:` line; import them again to make them refreshable.
 
 ## Network use and privacy
 

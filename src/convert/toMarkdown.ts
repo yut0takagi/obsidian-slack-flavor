@@ -12,6 +12,9 @@ const SAFE_SCHEMES = /^(https?|mailto|tel|slack|obsidian):/i;
 const MARKDOWN_SPECIAL = /[\\`*_~[\]<#$|^]/g;
 const MENTION_PREFIX = { user: "@", channel: "\\#", special: "@", usergroup: "@" } as const;
 const URL_UNSAFE: Record<string, string> = { " ": "%20", "(": "%28", ")": "%29", "<": "%3C", ">": "%3E" };
+// Names Slack itself produces: letters (custom emoji may be non-ASCII, e.g. :承知:), digits, _ - +.
+// The parser accepts more (anything but spaces and a few marks), which must not reach Markdown raw.
+const SLACK_EMOJI_NAME = /^[\p{L}\p{M}\p{N}_+-]+$/u;
 
 export function mrkdwnToMarkdown(src: string, opts: ParseOptions = {}): string {
   return parseMrkdwn(src, opts).flatMap(blockLines).join("\n");
@@ -88,8 +91,9 @@ function inline(nodes: Inline[]): string {
         out += MENTION_PREFIX[node.kind] + escapeText(node.label);
         break;
       case "emoji":
-        // Left as the code so the plugin (and Slack, when copied back) shows the workspace's emoji.
-        out += node.raw;
+        // Real emoji codes stay as they are so the plugin (and Slack, when copied back) shows the
+        // workspace's emoji; anything else is text from the message and is escaped like text.
+        out += SLACK_EMOJI_NAME.test(node.name) ? node.raw : escapeText(node.raw);
         break;
       case "br":
         out += "\n";

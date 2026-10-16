@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findSlackBlocks, pickBlock } from "../src/block/locate";
+import { blockAt, findSlackBlocks } from "../src/block/locate";
 
 const SRC = "source: https://acme.slack.com/archives/C1/p1790731800000100";
 const note = [
@@ -42,18 +42,18 @@ describe("findSlackBlocks", () => {
   });
 });
 
-describe("pickBlock", () => {
+describe("blockAt", () => {
   const blocks = findSlackBlocks(note);
-  const refreshable = (b: { content: string }) => b.content.startsWith("source:");
 
   it("picks the block under the cursor, fences included", () => {
-    expect(pickBlock(blocks, 4, refreshable)?.start).toBe(1);
-    expect(pickBlock(blocks, 6, refreshable)?.start).toBe(1);
-    expect(pickBlock(blocks, 12, refreshable)?.start).toBe(11);
+    expect(blockAt(blocks, 4)?.start).toBe(1);
+    expect(blockAt(blocks, 6)?.start).toBe(1);
+    expect(blockAt(blocks, 12)?.start).toBe(11);
   });
 
-  it("falls back to the only refreshable block in the note", () => {
-    expect(pickBlock(blocks, 0, refreshable)?.start).toBe(1);
-    expect(pickBlock([...blocks, { start: 20, end: 22, content: SRC }], 0, refreshable)).toBeUndefined();
+  it("never picks a block the cursor is not in, even when it is the only one", () => {
+    expect(blockAt(blocks, 0)).toBeUndefined();
+    expect(blockAt(blocks, 7)).toBeUndefined();
+    expect(blockAt([blocks[0]], 0)).toBeUndefined();
   });
 });
