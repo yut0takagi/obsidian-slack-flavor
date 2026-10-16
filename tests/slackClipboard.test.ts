@@ -3,7 +3,7 @@ import { markdownToSlackDoc, mrkdwnToSlackDoc } from "../src/convert/slackDoc";
 import { slackDocToDelta } from "../src/convert/toDelta";
 import { slackDocToHtml } from "../src/convert/toHtml";
 import { slackClipboardData } from "../src/convert/clipboardData";
-import { writeClipboard } from "../src/obsidian/clipboard";
+import { copyWithFallback, writeClipboard } from "../src/obsidian/clipboard";
 
 const delta = (md: string) => slackDocToDelta(markdownToSlackDoc(md)).ops;
 const html = (md: string) => slackDocToHtml(markdownToSlackDoc(md));
@@ -145,5 +145,56 @@ describe("writeClipboard", () => {
 
   it("reports failure when no copy event arrives", () => {
     expect(writeClipboard({ "text/plain": "p" }, window, () => false)).toBe(false);
+  });
+});
+
+describe("copyWithFallback", () => {
+  const data = { "text/plain": "*太字*", "text/html": "<b>太字</b>", "slack/texty": "{}" };
+
+  it("stops at the rich copy when it works", async () => {
+    const html = vi.fn(async () => {});
+    const text = vi.fn(async () => {});
+    expect(await copyWithFallback(data, { rich: () => true, html, text })).toEqual({ kind: "rich" });
+    expect(html).not.toHaveBeenCalled();
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it("falls back to HTML and text through the Clipboard API", async () => {
+    const html = vi.fn(async () => {});
+    expect(await copyWithFallback(data, { rich: () => false, html })).toEqual({ kind: "html" });
+    expect(html).toHaveBeenCalledWith("<b>太字</b>", "*太字*");
+  });
+
+  it("still copies the plain mrkdwn when formatted copies fail", async () => {
+    const text = vi.fn(async () => {});
+    const outcome = await copyWithFallback(data, {
+      rich: () => false,
+      html: async () => {
+        throw new Error("NotAllowedError");
+      },
+      text,
+    });
+    expect(outcome).toEqual({ kind: "plain" });
+    expect(text).toHaveBeenCalledWith("*太字*");
+  });
+
+  it("copies plain text when the copy event throws and ClipboardItem is missing", async () => {
+    const text = vi.fn(async () => {});
+    const rich = () => {
+      throw new Error("execCommand is not supported");
+    };
+    expect(await copyWithFallback(data, { rich, text })).toEqual({ kind: "plain" });
+  });
+
+  it("reports the last error when nothing could be copied", async () => {
+    const denied = new Error("denied");
+    const outcome = await copyWithFallback(data, {
+      rich: () => false,
+      text: async () => {
+        throw denied;
+      },
+    });
+    expect(outcome).toEqual({ kind: "failed", error: denied });
+    expect(await copyWithFallback(data, { rich: () => false })).toMatchObject({ kind: "failed" });
   });
 });
