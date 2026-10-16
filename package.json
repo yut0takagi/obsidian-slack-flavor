@@ -1,6 +1,6 @@
 {
   "name": "obsidian-slack-flavor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Write and preview Slack mrkdwn in Obsidian, render your workspace's custom emoji, import Slack threads, and copy notes as Slack-ready text.",
   "license": "MIT",
   "author": "Yuto Takagi",

@@ -65,6 +65,16 @@ body,
   font-size: 12px;
 }
 
+.sf-source {
+  margin-left: auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.sf-workspace + .sf-source {
+  margin-left: 0;
+}
+
 .sf-text {
   padding: 10px 16px;
 }

@@ -85,6 +85,23 @@ describe("parseSlackBlock", () => {
     expect(parseSlackBlock("↳ @a\nhi").messages).toEqual([{ author: "a", body: "hi", reactions: [], replies: [] }]);
   });
 
+  it("reads a source: line as meta, so it is not shown as text", () => {
+    const parsed = parseSlackBlock("channel: #general\nsource: https://acme.slack.com/archives/C1/p1790731800000100\n\n@a 9:00\nhi");
+    expect(parsed.meta).toEqual({ channel: "#general", source: "https://acme.slack.com/archives/C1/p1790731800000100" });
+    expect(parsed.text).toBe("");
+    expect(parsed.messages[0].body).toBe("hi");
+  });
+
+  it("keeps blocks without a source: line as they were", () => {
+    expect(parseSlackBlock("workspace: acme\ntitle: 定例\n\n@a\nhi").meta).toEqual({ workspace: "acme", title: "定例" });
+  });
+
+  it("treats source: further down as message text", () => {
+    const parsed = parseSlackBlock("@a\nsource: https://acme.slack.com/archives/C1/p1790731800000100");
+    expect(parsed.meta).toEqual({});
+    expect(parsed.messages[0].body).toBe("source: https://acme.slack.com/archives/C1/p1790731800000100");
+  });
+
   it("handles CRLF", () => {
     expect(parseSlackBlock("@a 1:00\r\nhi\r\n").messages[0]).toMatchObject({ author: "a", body: "hi" });
   });

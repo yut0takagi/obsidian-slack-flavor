@@ -2,5 +2,6 @@ node_modules/
 /main.js
 /data.json
 /emoji/
+/emoji-cache/
 *.log
 .DS_Store

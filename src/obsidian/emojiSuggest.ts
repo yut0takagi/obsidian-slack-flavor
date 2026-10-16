@@ -22,7 +22,10 @@ export class EmojiSuggest extends EditorSuggest<ResolvedEmoji> {
 
   getSuggestions(context: EditorSuggestContext): ResolvedEmoji[] {
     const workspace = this.plugin.workspaceForPath(context.file?.path ?? "");
-    return searchEmoji(context.query, this.plugin.emojiFor(workspace), MAX_SUGGESTIONS);
+    // Use local copies when there are any, but do not download every candidate while typing.
+    return searchEmoji(context.query, this.plugin.emojiFor(workspace), MAX_SUGGESTIONS).map((e) =>
+      e.kind === "custom" ? { ...e, url: this.plugin.imageCache.cachedUrl(e.url) ?? e.url } : e,
+    );
   }
 
   renderSuggestion(emoji: ResolvedEmoji, el: HTMLElement): void {

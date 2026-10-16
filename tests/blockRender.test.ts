@@ -25,6 +25,22 @@ describe("renderSlackBlock", () => {
     expect(texts(el, ".sf-workspace")).toEqual(["Acme"]);
   });
 
+  it("links the source thread from the header instead of showing the line", () => {
+    const el = render("source: https://acme.slack.com/archives/C1/p1790731800000100\n\n@a\nhi", { strings: { replies: (n) => `${n}`, copy: "コピー", openInSlack: "Slackで開く" } });
+    const link = el.querySelector(".sf-header a.sf-source");
+    expect(link?.getAttribute("href")).toBe("https://acme.slack.com/archives/C1/p1790731800000100");
+    expect(link?.textContent).toBe("Slackで開く");
+    expect(el.textContent).not.toContain("source:");
+  });
+
+  it("does not link a source that is not a Slack message link", () => {
+    for (const source of ["javascript:alert(1)", "https://example.com/archives/C1/p1790731800000100", "http://acme.slack.com/archives/C1/p1790731800000100"]) {
+      const el = render(`source: ${source}\n\n@a\nhi`);
+      expect(el.querySelector("a")).toBeNull();
+      expect(el.querySelector(".sf-header")).toBeNull();
+    }
+  });
+
   it("omits the header when there is nothing to show", () => {
     expect(render("@a\nhi").querySelector(".sf-header")).toBeNull();
   });

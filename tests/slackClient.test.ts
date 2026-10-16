@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { parsePermalink } from "../src/slack/permalink";
+import { parsePermalink, threadPermalink } from "../src/slack/permalink";
 import { SlackApiError, SlackClient, type HttpRequest, type HttpResponse } from "../src/slack/client";
 
 describe("parsePermalink", () => {
@@ -27,6 +27,18 @@ describe("parsePermalink", () => {
     expect(parsePermalink("https://org.enterprise.slack.com/archives/G9/p1000000000000001")?.channel).toBe("G9");
   });
 
+  it("formats a thread link that parses back to the same message", () => {
+    const link = threadPermalink("acme.slack.com", "C0123", "1727671234.567890");
+    expect(link).toBe("https://acme.slack.com/archives/C0123/p1727671234567890");
+    expect(parsePermalink(link ?? "")).toEqual({ domain: "acme.slack.com", channel: "C0123", ts: "1727671234.567890" });
+  });
+
+  it("refuses to format links outside Slack or with odd parts", () => {
+    expect(threadPermalink("example.com", "C1", "1727671234.567890")).toBeNull();
+    expect(threadPermalink("acme.slack.com", "../C1", "1727671234.567890")).toBeNull();
+    expect(threadPermalink("acme.slack.com", "C1", "1727671234")).toBeNull();
+  });
+
   it("rejects other urls", () => {
     expect(parsePermalink("https://example.com/archives/C1/p123")).toBeNull();
     expect(parsePermalink("not a url")).toBeNull();
@@ -48,9 +60,9 @@ const ok = (json: object): HttpResponse => ({ status: 200, headers: {}, json: { 
 
 describe("SlackClient", () => {
   it("posts form-encoded params with a bearer token", async () => {
-    const { http, calls } = fakeHttp([ok({ team: "CA", team_id: "T1", url: "https://ca.slack.com/", user_id: "U1" })]);
+    const { http, calls } = fakeHttp([ok({ team: "Example", team_id: "T1", url: "https://example.slack.com/", user_id: "U1" })]);
     const client = new SlackClient("xoxp-test", http);
-    await expect(client.authTest()).resolves.toMatchObject({ team: "CA", url: "https://ca.slack.com/" });
+    await expect(client.authTest()).resolves.toMatchObject({ team: "Example", url: "https://example.slack.com/" });
     expect(calls[0]).toEqual({
       url: "https://slack.com/api/auth.test",
       method: "POST",
