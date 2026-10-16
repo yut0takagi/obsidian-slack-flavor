@@ -1,5 +1,9 @@
 # Slack Flavor
 
+![Downloads](https://raw.githubusercontent.com/yut0takagi/obsidian-slack-flavor/main/.github/stats/badge.svg)
+
+![Download history](https://raw.githubusercontent.com/yut0takagi/obsidian-slack-flavor/main/.github/stats/downloads.svg)
+
 Write Slack-formatted messages in Obsidian and see them the way Slack shows them, with your workspace's custom emoji.
 
 - **`slack` code blocks** render Slack mrkdwn (`*bold*` `_italic_` `~strike~` `` `code` `` quotes, links, mentions, `:emoji:`) and whole conversations with threads and reactions.
