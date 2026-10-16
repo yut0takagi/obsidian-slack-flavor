@@ -45,6 +45,16 @@ describe("threadToBlock", () => {
     );
   });
 
+  it("writes title and source lines that the parser reads back as meta", async () => {
+    const out = await threadToBlock([{ ts: ROOT, user: "U1", text: "q" }], { ...deps, channel: "general", title: "定例", source: "https://acme.slack.com/archives/C1/p1790731800000100" });
+    expect(out.split("\n").slice(0, 5)).toEqual(["```slack", "channel: #general", "title: 定例", "source: https://acme.slack.com/archives/C1/p1790731800000100", ""]);
+    expect(parseSlackBlock(out.split("\n").slice(1, -1).join("\n")).meta).toEqual({
+      channel: "#general",
+      title: "定例",
+      source: "https://acme.slack.com/archives/C1/p1790731800000100",
+    });
+  });
+
   it("round-trips through the block parser", async () => {
     const messages: SlackApiMessage[] = [
       { ts: ROOT, user: "U1", text: "q", reactions: [{ name: "eyes", count: 2 }] },

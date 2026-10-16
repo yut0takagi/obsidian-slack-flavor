@@ -8,6 +8,9 @@ export interface ThreadToBlockDeps {
   /** Channel the thread lives in, written as the block's `channel:` line. */
   channel?: string;
   workspace?: string;
+  title?: string;
+  /** Link to the thread, written as `source:` so the block can be refreshed later. */
+  source?: string;
 }
 
 const USER_MENTION = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g;
@@ -18,6 +21,8 @@ export async function threadToBlock(messages: SlackApiMessage[], deps: ThreadToB
   const lines: string[] = [];
   if (deps.workspace) lines.push(`workspace: ${deps.workspace}`);
   if (deps.channel) lines.push(`channel: #${deps.channel.replace(/^#/, "")}`);
+  if (deps.title) lines.push(`title: ${deps.title}`);
+  if (deps.source) lines.push(`source: ${deps.source}`);
 
   const rootTs = messages[0]?.thread_ts ?? messages[0]?.ts;
   for (const msg of messages) {

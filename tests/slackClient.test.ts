@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { parsePermalink } from "../src/slack/permalink";
+import { parsePermalink, threadPermalink } from "../src/slack/permalink";
 import { SlackApiError, SlackClient, type HttpRequest, type HttpResponse } from "../src/slack/client";
 
 describe("parsePermalink", () => {
@@ -25,6 +25,18 @@ describe("parsePermalink", () => {
       threadTs: "1727671234.567890",
     });
     expect(parsePermalink("https://org.enterprise.slack.com/archives/G9/p1000000000000001")?.channel).toBe("G9");
+  });
+
+  it("formats a thread link that parses back to the same message", () => {
+    const link = threadPermalink("acme.slack.com", "C0123", "1727671234.567890");
+    expect(link).toBe("https://acme.slack.com/archives/C0123/p1727671234567890");
+    expect(parsePermalink(link ?? "")).toEqual({ domain: "acme.slack.com", channel: "C0123", ts: "1727671234.567890" });
+  });
+
+  it("refuses to format links outside Slack or with odd parts", () => {
+    expect(threadPermalink("example.com", "C1", "1727671234.567890")).toBeNull();
+    expect(threadPermalink("acme.slack.com", "../C1", "1727671234.567890")).toBeNull();
+    expect(threadPermalink("acme.slack.com", "C1", "1727671234")).toBeNull();
   });
 
   it("rejects other urls", () => {

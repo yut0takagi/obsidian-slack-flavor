@@ -1,10 +1,11 @@
 import { append } from "../dom";
 import { parseInline, parseMrkdwn, type ParseOptions } from "../mrkdwn/parse";
 import { createEmojiEl, isEmojiOnly, renderBlocks, type RenderContext } from "../mrkdwn/render";
+import { parsePermalink } from "../slack/permalink";
 import type { SlackBlock, SlackMessage } from "./parse";
 
 export interface BlockRenderContext extends RenderContext {
-  strings: { replies: (count: number) => string; copy: string };
+  strings: { replies: (count: number) => string; copy: string; openInSlack?: string };
   workspaceLabel?: string;
   parseOptions?: ParseOptions;
   /** When set, copy buttons are shown and receive the raw mrkdwn. */
@@ -42,11 +43,20 @@ export function renderSlackBlock(block: SlackBlock, parent: HTMLElement, ctx: Bl
 
 function renderHeader(block: SlackBlock, root: HTMLElement, ctx: BlockRenderContext): void {
   const { channel, title } = block.meta;
-  if (!channel && !title && !ctx.workspaceLabel) return;
+  // Only real Slack message links get a link: the line is plain text anyone can edit.
+  const source = block.meta.source && parsePermalink(block.meta.source) && /^https:\/\//.test(block.meta.source) ? block.meta.source : undefined;
+  if (!channel && !title && !ctx.workspaceLabel && !source) return;
   const header = append(root, "div", "sf-header");
   if (channel) append(header, "span", "sf-channel").textContent = channel.startsWith("#") ? channel : `#${channel}`;
   if (title) append(header, "span", "sf-title").textContent = title;
   if (ctx.workspaceLabel) append(header, "span", "sf-workspace").textContent = ctx.workspaceLabel;
+  if (source) {
+    const a = append(header, "a", "sf-source external-link");
+    a.setAttribute("href", source);
+    a.setAttribute("target", "_blank");
+    a.setAttribute("rel", "noopener noreferrer");
+    a.textContent = ctx.strings.openInSlack ?? "Slack";
+  }
 }
 
 function renderMessage(msg: SlackMessage, parent: HTMLElement, ctx: BlockRenderContext, continued: boolean, reply: boolean): void {

@@ -7,6 +7,9 @@ export interface Permalink {
   threadTs?: string;
 }
 
+const SLACK_HOST = /^(?:[a-z0-9-]+\.)*slack\.com$/;
+const CHANNEL_ID = /^[A-Z0-9]+$/;
+const TS = /^\d+\.\d{6}$/;
 const ARCHIVES = /^\/archives\/([A-Z0-9]+)\/p(\d{7,})\/?$/;
 const CLIENT_THREAD = /^\/client\/[A-Z0-9]+\/([A-Z0-9]+)\/thread\/[A-Z0-9]+-(\d+\.\d+)\/?$/;
 
@@ -18,7 +21,7 @@ export function parsePermalink(input: string): Permalink | null {
   } catch {
     return null;
   }
-  if (!/(^|\.)slack\.com$/.test(url.hostname)) return null;
+  if (!SLACK_HOST.test(url.hostname)) return null;
 
   const archive = ARCHIVES.exec(url.pathname);
   if (archive) {
@@ -32,4 +35,10 @@ export function parsePermalink(input: string): Permalink | null {
   const thread = CLIENT_THREAD.exec(url.pathname);
   if (thread) return { domain: url.hostname, channel: thread[1], ts: thread[2], threadTs: thread[2] };
   return null;
+}
+
+/** The /archives/ link for a message, the form parsePermalink reads back; null for anything that is not Slack's. */
+export function threadPermalink(domain: string, channel: string, ts: string): string | null {
+  if (!SLACK_HOST.test(domain) || !CHANNEL_ID.test(channel) || !TS.test(ts)) return null;
+  return `https://${domain}/archives/${channel}/p${ts.replace(".", "")}`;
 }

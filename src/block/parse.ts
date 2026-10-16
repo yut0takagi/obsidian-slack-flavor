@@ -1,8 +1,9 @@
 /**
  * The ```slack code block format:
  *
- *   workspace: acme      <- optional meta lines (workspace / channel / title)
+ *   workspace: acme      <- optional meta lines (workspace / channel / title / source)
  *   channel: #general
+ *   source: https://acme.slack.com/archives/C…/p…   <- where an imported thread came from
  *
  *   @田中 10:30                <- message header: at the top or after a blank line
  *   body in Slack mrkdwn
@@ -34,6 +35,8 @@ export interface SlackBlockMeta {
   workspace?: string;
   channel?: string;
   title?: string;
+  /** Link to the thread's root message, written on import so the block can be refreshed. */
+  source?: string;
 }
 
 export interface SlackBlock {
@@ -43,7 +46,7 @@ export interface SlackBlock {
   messages: SlackMessage[];
 }
 
-const META = /^(workspace|channel|title)\s*:\s*(.*)$/i;
+const META = /^(workspace|channel|title|source)\s*:\s*(.*)$/i;
 const TIME = String.raw`(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+)?\d{1,2}:\d{2}`;
 const HEADER = new RegExp(String.raw`^(?:(↳|>>)\s*)?@(.+?)(?:\s+(${TIME}))?\s*$`);
 const REACTION_EMOJI = String.raw`:${EMOJI_NAME}:(?::skin-tone-[2-6]:)?`;
