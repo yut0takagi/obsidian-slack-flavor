@@ -107,8 +107,11 @@ export class SlackFlavorSettingTab extends PluginSettingTab {
           new Notice(s.cacheCleared);
         }),
       );
-    // File sizes are read in the background after startup.
-    void cache.idle().then(() => setting.setDesc(describe()));
+    // File sizes are read in the background after startup. Keep the braces: Setting has a chaining
+    // then(), so returning it from the callback makes the promise adopt it forever and freezes Obsidian.
+    void cache.idle().then(() => {
+      setting.setDesc(describe());
+    });
   }
 
   private workspaceSettings(w: WorkspaceConfig): void {
