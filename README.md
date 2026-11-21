@@ -151,7 +151,10 @@ npm test            # vitest
 npm run build       # main.js
 npm run gen:emoji   # regenerate src/emoji/standard.json from emoji-datasource
 npm run check       # type check + tests + production build (what CI runs)
+npm run smoke       # start a real Obsidian on a throwaway vault and drive the plugin (build first)
 ```
+
+`npm run smoke` never touches your own vaults, profile or clipboard and never talks to Slack. On macOS it uses `/Applications/Obsidian.app` with the newest app version from your Obsidian profile; elsewhere set `OBSIDIAN_BIN` to the Obsidian executable. CI runs it on Linux against the oldest supported Obsidian (`minAppVersion`) and the latest release.
 
 Releases: bump `version` in `manifest.json`, `package.json` and `versions.json`, merge, then push a tag with the bare version (e.g. `0.1.0`). The release workflow builds and attaches `main.js`, `manifest.json` and `styles.css`.
 
