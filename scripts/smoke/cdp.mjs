@@ -93,6 +93,13 @@ export async function connect(port, timeoutMs) {
   return {
     pluginErrors,
 
+    /** Sends a raw protocol command (Emulation.*, Input.*, Page.captureScreenshot …) and returns its result. */
+    async send(method, params) {
+      const res = await send(method, params);
+      if (res.error) throw new Error(`${method}: ${res.error.message}`);
+      return res.result;
+    },
+
     /** Evaluates an expression in Obsidian's window, awaiting a returned promise. Throws HangError on timeout. */
     async evaluate(expression, timeoutMs) {
       const call = send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
