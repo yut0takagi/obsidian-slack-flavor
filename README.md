@@ -135,7 +135,7 @@ In Slack, choose **Copy link** on a message or a reply, then run **Import Slack 
 - **Slack block**: a `slack` block that looks like Slack, with a `source:` line linking the thread.
 - **Markdown (callout)**: an ordinary `> [!quote]` callout with each message's author and time in bold, Slack formatting converted to Markdown and the channel linked to the thread. It reads fine in any Markdown app; custom emoji in it use the note's workspace.
 
-To update an imported block with new replies and reactions, put the cursor inside it and run **Refresh Slack thread in block**. The plugin first shows the workspace, channel and thread date it is about to read and only fetches after you confirm; a block whose `source:` link is not on the selected workspace's domain is refused. The block is rewritten from Slack, keeping its `workspace:` and `title:` lines; anything else you edited inside it is replaced. Blocks imported before 0.2.0 have no `source:` line; import them again to make them refreshable.
+To update an imported block with new replies and reactions, click **Refresh** in the block's header (next to **Open in Slack**), or put the cursor inside it and run **Refresh Slack thread in block**. The plugin first shows the workspace, channel and thread date it is about to read and only fetches after you confirm; a block whose `source:` link is not on the selected workspace's domain is refused. The block is rewritten from Slack, keeping its `workspace:` and `title:` lines; anything else you edited inside it is replaced. Blocks imported before 0.2.0 have no `source:` line; import them again to make them refreshable.
 
 ## Network use and privacy
 
@@ -171,7 +171,7 @@ Obsidian で Slack の書式を書いてプレビューし、ワークスペー�
 - ```` ```slack ```` ブロックに Slack 記法（mrkdwn）や会話を書くと、Slack と同じ見た目で表示します
 - ワークスペースを登録すると、そのカスタム絵文字（`:承知:` など）をブロック・閲覧モード・ライブプレビューで画像表示します。`:` のあとに2文字打つと候補が出ます
 - ノートや選択範囲を Slack 用の書式に変換してコピーします。日本語に隣接する装飾記号には半角スペースを補います
-- Slack のメッセージリンクからスレッドを取り込み、```` ```slack ```` ブロック（または Markdown のコールアウト）として挿入します。取り込んだブロックは **Refresh Slack thread in block** で最新の返信・リアクションに更新できます
+- Slack のメッセージリンクからスレッドを取り込み、```` ```slack ```` ブロック（または Markdown のコールアウト）として挿入します。取り込んだブロックは、見出しの「再取得」ボタンか **Refresh Slack thread in block** コマンドで、最新の返信・リアクションに更新できます
 - 絵文字の一覧は一定期間（既定 7 日）ごとに起動時に自動で更新します。一度表示した絵文字の画像はプラグインのフォルダに保存し、オフラインでも表示します
 - ブロック内のメンション（`<@U123|name>`）は書式付きコピーでは「@name」という文字になり、Slack に貼ってもメンションにはなりません
 

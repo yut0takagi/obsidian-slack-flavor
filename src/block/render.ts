@@ -5,11 +5,13 @@ import { parsePermalink } from "../slack/permalink";
 import type { SlackBlock, SlackMessage } from "./parse";
 
 export interface BlockRenderContext extends RenderContext {
-  strings: { replies: (count: number) => string; copy: string; openInSlack?: string };
+  strings: { replies: (count: number) => string; copy: string; openInSlack?: string; refresh?: string };
   workspaceLabel?: string;
   parseOptions?: ParseOptions;
   /** When set, copy buttons are shown and receive the raw mrkdwn. */
   onCopy?: (mrkdwn: string) => void;
+  /** When set, a block with a Slack source link gets a refresh button that calls this. */
+  onRefresh?: () => void | Promise<void>;
 }
 
 const AVATAR_COLORS = 8;
@@ -56,7 +58,32 @@ function renderHeader(block: SlackBlock, root: HTMLElement, ctx: BlockRenderCont
     a.setAttribute("target", "_blank");
     a.setAttribute("rel", "noopener noreferrer");
     a.textContent = ctx.strings.openInSlack ?? "Slack";
+    if (ctx.onRefresh) refreshButton(header, ctx.onRefresh, ctx.strings.refresh ?? "Refresh");
   }
+}
+
+function refreshButton(header: HTMLElement, onRefresh: () => void | Promise<void>, label: string): void {
+  const btn = append(header, "button", "sf-refresh");
+  btn.setAttribute("type", "button");
+  btn.textContent = label;
+  btn.addEventListener("click", (e) => {
+    // In live preview a click that reaches the editor would open the block for editing instead.
+    e.preventDefault();
+    e.stopPropagation();
+    if (btn.disabled) return;
+    btn.disabled = true;
+    let pending: Promise<void>;
+    try {
+      pending = Promise.resolve(onRefresh());
+    } catch (err) {
+      pending = Promise.reject(err);
+    }
+    void pending
+      .catch((err: unknown) => console.error("Slack Flavor: refresh failed", err))
+      .finally(() => {
+        btn.disabled = false;
+      });
+  });
 }
 
 function renderMessage(msg: SlackMessage, parent: HTMLElement, ctx: BlockRenderContext, continued: boolean, reply: boolean): void {

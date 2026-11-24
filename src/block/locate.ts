@@ -34,6 +34,22 @@ function isClosing(line: string, marker: string): boolean {
 }
 
 /**
+ * True when the block's lines, fences included, are where and what they were when it was read.
+ * Slack answers and the confirmation take a while; anything edited or moved meanwhile is left alone.
+ */
+export function blockUnchanged(now: string[], before: string[], block: SlackBlockRange): boolean {
+  if (now.length <= block.end) return false;
+  for (let i = block.start; i <= block.end; i++) if (now[i] !== before[i]) return false;
+  return true;
+}
+
+/** The note's lines with the block (fences included) replaced by `fresh`, or null when it changed meanwhile. */
+export function replaceBlock(now: string[], before: string[], block: SlackBlockRange, fresh: string): string[] | null {
+  if (!blockUnchanged(now, before, block)) return null;
+  return [...now.slice(0, block.start), fresh, ...now.slice(block.end + 1)];
+}
+
+/**
  * The block under the cursor line. There is deliberately no "nearest" or "only block" fallback:
  * refreshing reads Slack with the user's token, so it must only act on a block the user pointed at.
  */

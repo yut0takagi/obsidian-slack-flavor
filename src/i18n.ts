@@ -25,6 +25,8 @@ const en = {
   noSource: "This block has no source: line. Import the thread again to make it refreshable.",
   blockChanged: "The block changed while refreshing; nothing was replaced.",
   openInSlack: "Open in Slack",
+  refresh: "Refresh",
+  noBlockPosition: "Could not find this block in the note. Put the cursor inside it and run “Refresh Slack thread in block”.",
   refreshUnknownDomain: (name: string) => `The domain of “${name}” is not known yet. Fetch its emoji once in the settings, then try again.`,
   refreshOtherWorkspace: (host: string, name: string) =>
     `Not refreshed: the block's source is on ${host}, not on “${name}”. Only threads from the workspace whose token is used can be refreshed.`,
@@ -116,6 +118,8 @@ const ja: Strings = {
   noSource: "このブロックには source: 行がありません。再取得できるようにするには、スレッドを取り込み直してください。",
   blockChanged: "再取得中にブロックが変更されたため、置き換えませんでした。",
   openInSlack: "Slackで開く",
+  refresh: "再取得",
+  noBlockPosition: "ノート内でこのブロックの位置が分かりませんでした。ブロックの中にカーソルを置いて「ブロックのSlackスレッドを再取得」を実行してください。",
   refreshUnknownDomain: (name) => `「${name}」のドメインがまだ分かりません。設定で一度絵文字を取得してから、もう一度実行してください。`,
   refreshOtherWorkspace: (host, name) =>
     `再取得しませんでした: このブロックの取り込み元は ${host} で、「${name}」ではありません。再取得できるのは、使うトークンと同じワークスペースのスレッドだけです。`,

@@ -1,5 +1,5 @@
-import { type Editor, getLanguage, MarkdownView, Notice, Plugin, type TFile } from "obsidian";
-import { blockAt, findSlackBlocks } from "./src/block/locate";
+import { type Editor, getLanguage, type MarkdownPostProcessorContext, MarkdownView, Notice, Plugin, type TFile } from "obsidian";
+import { blockAt, blockUnchanged, findSlackBlocks, replaceBlock, type SlackBlockRange } from "./src/block/locate";
 import { parseSlackBlock } from "./src/block/parse";
 import { renderSlackBlock } from "./src/block/render";
 import { slackClipboardData } from "./src/convert/clipboardData";
@@ -37,6 +37,12 @@ import { EmojiImageCache } from "./src/store/imageCache";
 const AUTO_REFRESH_DELAY_MS = 5000;
 const MB = 1024 * 1024;
 
+/** A refreshed block: its new text, fences included, and how many messages it holds. */
+interface FreshBlock {
+  text: string;
+  messages: number;
+}
+
 export default class SlackFlavorPlugin extends Plugin {
   override settings: SlackFlavorSettings = structuredClone(DEFAULT_SETTINGS);
   strings: Strings = createStrings("en");
@@ -56,7 +62,7 @@ export default class SlackFlavorPlugin extends Plugin {
     // Awaited so the first render already finds local copies (that is what makes emoji show offline).
     await this.imageCache.load().catch(() => undefined);
 
-    this.registerMarkdownCodeBlockProcessor("slack", (source, el, ctx) => this.renderBlock(source, el, ctx.sourcePath));
+    this.registerMarkdownCodeBlockProcessor("slack", (source, el, ctx) => this.renderBlock(source, el, ctx));
     this.registerMarkdownPostProcessor((el, ctx) => {
       if (this.settings.renderEmojiInNotes) renderNoteEmoji(el, this.resolverFor(this.workspaceForPath(ctx.sourcePath)));
     });
@@ -190,9 +196,9 @@ export default class SlackFlavorPlugin extends Plugin {
 
   // --- features -------------------------------------------------------------
 
-  private renderBlock(source: string, el: HTMLElement, sourcePath: string): void {
+  private renderBlock(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
     const block = parseSlackBlock(source);
-    const workspace = this.workspaceForPath(sourcePath, block.meta.workspace);
+    const workspace = this.workspaceForPath(ctx.sourcePath, block.meta.workspace);
     const label = block.meta.workspace ? (workspace?.name ?? `${block.meta.workspace} (?)`) : undefined;
     renderSlackBlock(block, el, {
       resolveEmoji: this.resolverFor(workspace),
@@ -200,6 +206,7 @@ export default class SlackFlavorPlugin extends Plugin {
       workspaceLabel: label,
       parseOptions: { strict: this.settings.strictBoundaries },
       onCopy: (text) => void this.copyForSlack([{ type: "mrkdwn", text, lines: mrkdwnToSlackDoc(text) }]),
+      onRefresh: () => this.refreshRenderedBlock(el, ctx),
     });
   }
 
@@ -261,52 +268,101 @@ export default class SlackFlavorPlugin extends Plugin {
     }).open();
   }
 
-  /**
-   * Re-reads the thread a block was imported from and replaces the block with the current replies and
-   * reactions. The block is note text that others may have written (shared or synced vaults), so only
-   * the block under the cursor is used, its link must be on the token's own workspace, and the user
-   * confirms the workspace, channel and thread before anything is read.
-   */
+  /** Command: refreshes the block under the cursor. */
   private async refreshThread(editor: Editor, file: TFile | null): Promise<void> {
-    const s = this.strings;
     const lines = editor.getValue().split("\n");
     const target = blockAt(findSlackBlocks(lines), editor.getCursor().line);
     if (!target) {
-      new Notice(s.noBlockHere);
+      new Notice(this.strings.noBlockHere);
       return;
     }
-    const meta = parseSlackBlock(target.content).meta;
+    const fresh = await this.freshBlock(target.content, file?.path ?? "");
+    if (fresh) this.replaceInEditor(editor, lines, target, fresh);
+  }
+
+  /** The refresh button in a rendered block's header: the block is the one Obsidian rendered there. */
+  private async refreshRenderedBlock(el: HTMLElement, ctx: MarkdownPostProcessorContext): Promise<void> {
+    const s = this.strings;
+    const file = this.app.vault.getFileByPath(ctx.sourcePath);
+    const info = ctx.getSectionInfo(el);
+    const lines = info ? info.text.split("\n") : [];
+    const target = info ? findSlackBlocks(lines).find((b) => b.start === info.lineStart) : undefined;
+    if (!file || !target) {
+      new Notice(s.noBlockPosition);
+      return;
+    }
+    const fresh = await this.freshBlock(target.content, file.path);
+    if (!fresh) return;
+    // Through the editor when the note is open in one, so the change can be undone; otherwise the file.
+    const editing = this.app.workspace
+      .getLeavesOfType("markdown")
+      .map((leaf) => leaf.view)
+      .find((view): view is MarkdownView => view instanceof MarkdownView && view.file?.path === file.path && view.getMode() === "source");
+    if (editing) {
+      this.replaceInEditor(editing.editor, lines, target, fresh);
+      return;
+    }
+    let replaced = false;
+    await this.app.vault.process(file, (data) => {
+      const next = replaceBlock(data.split("\n"), lines, target, fresh.text);
+      replaced = next !== null;
+      return next ? next.join("\n") : data;
+    });
+    new Notice(replaced ? s.refreshed(fresh.messages) : s.blockChanged);
+  }
+
+  /** Replaces the block unless it was edited or moved while Slack answered. */
+  private replaceInEditor(editor: Editor, before: string[], target: SlackBlockRange, fresh: FreshBlock): void {
+    const now = editor.getValue().split("\n");
+    if (!blockUnchanged(now, before, target)) {
+      new Notice(this.strings.blockChanged);
+      return;
+    }
+    editor.replaceRange(fresh.text, { line: target.start, ch: 0 }, { line: target.end, ch: now[target.end].length });
+    new Notice(this.strings.refreshed(fresh.messages));
+  }
+
+  /**
+   * Re-reads the thread a block was imported from and returns the block's new text (fences included),
+   * or null after telling the user why not. The block is note text that others may have written (shared
+   * or synced vaults), so callers only pass a block the user pointed at (cursor or the block's own
+   * button), its link must be on the token's own workspace, and the user confirms the workspace,
+   * channel and thread before anything is read.
+   */
+  private async freshBlock(content: string, sourcePath: string): Promise<FreshBlock | null> {
+    const s = this.strings;
+    const meta = parseSlackBlock(content).meta;
     const permalink = meta.source ? parsePermalink(meta.source) : null;
     if (!permalink) {
       new Notice(s.noSource);
-      return;
+      return null;
     }
     const workspace =
-      findWorkspace(this.settings, meta.workspace) ?? findWorkspace(this.settings, permalink.domain) ?? this.workspaceForPath(file?.path ?? "");
+      findWorkspace(this.settings, meta.workspace) ?? findWorkspace(this.settings, permalink.domain) ?? this.workspaceForPath(sourcePath);
     if (!workspace) {
       new Notice(s.noWorkspace);
-      return;
+      return null;
     }
     const check = checkRefreshSource(permalink, workspace);
     if (!check.ok) {
       new Notice(check.reason === "unknown-domain" ? s.refreshUnknownDomain(workspace.name) : s.refreshOtherWorkspace(check.host, workspace.name));
-      return;
+      return null;
     }
     const token = this.tokenFor(workspace);
     if (!token) {
       new Notice(s.noToken(workspace.name));
-      return;
+      return null;
     }
 
     const client = new SlackClient(token, obsidianHttp);
     // Only the channel's name is looked up before the user agrees; it is shown in the dialog, not written anywhere.
     const channelName = await client.channelName(permalink.channel);
-    if (!(await confirmRefresh(this.app, s, refreshSummary(workspace, permalink, channelName)))) return;
+    if (!(await confirmRefresh(this.app, s, refreshSummary(workspace, permalink, channelName)))) return null;
 
     const notice = new Notice(s.refreshing, 0);
     try {
       const messages = await client.replies(permalink.channel, permalink.threadTs ?? permalink.ts);
-      const fresh = await threadToBlock(messages, {
+      const text = await threadToBlock(messages, {
         userName: (id) => client.userName(id),
         channelName: (id) => client.channelName(id),
         channel: channelName ?? meta.channel,
@@ -314,19 +370,12 @@ export default class SlackFlavorPlugin extends Plugin {
         title: meta.title,
         source: meta.source,
       });
-      // The note may have been edited while Slack answered: only replace the block if it is unchanged.
-      const now = editor.getValue().split("\n");
-      const unchanged = now.slice(target.start, target.end + 1).join("\n") === lines.slice(target.start, target.end + 1).join("\n");
-      notice.hide();
-      if (!unchanged) {
-        new Notice(s.blockChanged);
-        return;
-      }
-      editor.replaceRange(fresh, { line: target.start, ch: 0 }, { line: target.end, ch: now[target.end].length });
-      new Notice(s.refreshed(messages.length));
+      return { text, messages: messages.length };
     } catch (err) {
-      notice.hide();
       new Notice(describeError(err, s));
+      return null;
+    } finally {
+      notice.hide();
     }
   }
 
