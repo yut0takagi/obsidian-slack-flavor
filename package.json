@@ -23,7 +23,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "node scripts/smoke/index.mjs",
-    "check": "tsc --noEmit -p . && vitest run && node esbuild.config.mjs production"
+    "check": "tsc --noEmit -p . && vitest run && node esbuild.config.mjs production && node scripts/check-bundle.mjs"
   },
   "devDependencies": {
     "@codemirror/language": "^6.12.4",

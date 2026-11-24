@@ -150,11 +150,13 @@ npm install
 npm test            # vitest
 npm run build       # main.js
 npm run gen:emoji   # regenerate src/emoji/standard.json from emoji-datasource
-npm run check       # type check + tests + production build (what CI runs)
+npm run check       # type check + tests + production build + mobile-safe bundle check (what CI runs)
 npm run smoke       # start a real Obsidian on a throwaway vault and drive the plugin (build first)
 ```
 
-`npm run smoke` never touches your own vaults, profile or clipboard and never talks to Slack. On macOS it uses `/Applications/Obsidian.app` with the newest app version from your Obsidian profile; elsewhere set `OBSIDIAN_BIN` to the Obsidian executable. CI runs it on Linux against the oldest supported Obsidian (`minAppVersion`) and the latest release.
+`npm run smoke` runs twice: as the desktop app, then with Obsidian's own mobile UI on a phone-sized window. It never touches your own vaults, profile or clipboard and never talks to Slack. On macOS it uses `/Applications/Obsidian.app` with the newest app version from your Obsidian profile; elsewhere set `OBSIDIAN_BIN` to the Obsidian executable. `SMOKE_PASSES=desktop` (or `mobile`) runs one pass, `SMOKE_SCREENSHOTS=<folder>` saves screenshots. CI runs it on Linux against the oldest supported Obsidian (`minAppVersion`) and the latest release, and keeps the screenshots as an artifact.
+
+Emulation is not a phone: there is still Node.js underneath. `npm run check` therefore also fails if `main.js` uses anything mobile lacks (Node.js, Electron, modules other than `obsidian`, `@codemirror/*`, `@lezer/*`). A release still deserves a look on a real phone.
 
 Releases: bump `version` in `manifest.json`, `package.json` and `versions.json`, merge, then push a tag with the bare version (e.g. `0.1.0`). The release workflow builds and attaches `main.js`, `manifest.json` and `styles.css`.
 

@@ -1,11 +1,15 @@
 // npm run smoke: start a real Obsidian on a throwaway profile and vault, drive the plugin through the
-// things a user does first, and fail if a step hangs or the plugin logs an error. Never talks to Slack.
+// things a user does first, and fail if a step hangs or the plugin logs an error. It runs twice: as the
+// desktop app, then with Obsidian emulating a phone (its own mobile UI on a phone-sized window).
+// Never talks to Slack and never touches your vaults, profile or clipboard.
 //
-//   OBSIDIAN_BIN      Obsidian executable (default: /Applications/Obsidian.app on macOS)
-//   OBSIDIAN_ASAR     app package to run (default: the newest one in your Obsidian profile, if any)
-//   SMOKE_PLUGIN_DIR  folder with main.js, manifest.json, styles.css (default: the repo root)
-//   SMOKE_KEEP=1      keep the temp profile and vault for a look afterwards
-import { readFile } from "node:fs/promises";
+//   OBSIDIAN_BIN       Obsidian executable (default: /Applications/Obsidian.app on macOS)
+//   OBSIDIAN_ASAR      app package to run (default: the newest one in your Obsidian profile, if any)
+//   SMOKE_PLUGIN_DIR   folder with main.js, manifest.json, styles.css (default: the repo root)
+//   SMOKE_PASSES       desktop,mobile (default) or just one of them
+//   SMOKE_SCREENSHOTS  folder to save screenshots of each pass into
+//   SMOKE_KEEP=1       keep the temp profile and vault for a look afterwards
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect } from "./cdp.mjs";
@@ -13,14 +17,16 @@ import { createSandbox, PLUGIN_ID } from "./sandbox.mjs";
 
 const LAUNCH_MS = 90_000;
 const STEP_MS = 20_000;
+const PHONE = { width: 390, height: 844, deviceScaleFactor: 2, mobile: true };
 const pluginDir = process.env.SMOKE_PLUGIN_DIR || fileURLToPath(new URL("../../", import.meta.url));
+const passes = (process.env.SMOKE_PASSES || "desktop,mobile").split(",").map((p) => p.trim());
+const screenshotDir = process.env.SMOKE_SCREENSHOTS || null;
 
 // Page-side helpers, prepended to every expression.
 const PRELUDE = `
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const plugin = () => app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
-  const leafIn = (mode) => app.workspace.getLeavesOfType("markdown").find((l) => l.view.getMode() === mode);
-  const closeModals = () => document.querySelectorAll(".modal-container .modal-close-button").forEach((b) => b.click());
+  const noteLeaf = () => app.workspace.getLeavesOfType("markdown")[0];
   async function until(check, ms) {
     for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) {
       const v = check();
@@ -28,8 +34,15 @@ const PRELUDE = `
     }
     return check();
   }
+  async function setMode(mode) {
+    const leaf = noteLeaf();
+    const vs = leaf.getViewState();
+    await leaf.setViewState({ ...vs, state: { ...vs.state, mode, source: false } });
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+  }
 `;
 const page = (body) => `(async () => { ${PRELUDE} ${body} })()`;
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class StepFailure extends Error {}
 function expect(ok, message) {
@@ -40,27 +53,64 @@ const BOOT = page(`
   await until(() => window.app?.workspace?.layoutReady, ${LAUNCH_MS});
   const atStartup = !!plugin();
   await app.plugins.setEnable(true);
-  closeModals();
+  document.querySelectorAll(".modal-container .modal-close-button").forEach((b) => b.click());
   const version = window.require?.("electron")?.ipcRenderer.sendSync("version") ?? document.title;
-  return { version, atStartup };
+  return { version, atStartup, mobile: document.body.classList.contains("is-mobile") };
 `);
 
-/** The steps of one run, in order. Each gets the live connection of the current Obsidian session. */
+async function pressKey(cdp, key, code, keyCode) {
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
+}
+
+/** Closes whatever modal is open: the close button on desktop, Escape on mobile (no button there). */
+async function closeModals(cdp) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const open = await cdp.evaluate(page(`return document.querySelectorAll(".modal-container").length;`), STEP_MS);
+    if (!open) return;
+    await cdp.evaluate(page(`document.querySelectorAll(".modal-container .modal-close-button").forEach((b) => b.click()); return 0;`), STEP_MS);
+    await pressKey(cdp, "Escape", "Escape", 27);
+    // Mobile modals slide out for about half a second before they leave the DOM.
+    await cdp.evaluate(page(`return await until(() => !document.querySelector(".modal-container"), 2000);`), STEP_MS);
+  }
+  throw new StepFailure("a modal would not close");
+}
+
+async function screenshot(session, name) {
+  if (!screenshotDir) return;
+  await mkdir(screenshotDir, { recursive: true });
+  const { data } = await session.cdp.send("Page.captureScreenshot", { format: "png" });
+  await writeFile(join(screenshotDir, `${session.pass}-${name}.png`), Buffer.from(data, "base64"));
+}
+
+/** Waits for a page condition across a reload, when the page's JS context comes and goes. */
+async function waitAcrossReload(cdp, condition, ms) {
+  for (const end = Date.now() + ms; Date.now() < end; await delay(300)) {
+    try {
+      if (await cdp.evaluate(condition, 3000)) return;
+    } catch {
+      // The context is being replaced.
+    }
+  }
+  throw new StepFailure(`timed out waiting for ${condition}`);
+}
+
+/** The steps of one pass, in order. Each gets the session: its pass name and live connection. */
 const steps = [
   {
-    name: "open the fixture note in live preview and reading view",
+    name: "open the fixture note",
     async run({ cdp }) {
-      const modes = await cdp.evaluate(
+      const mode = await cdp.evaluate(
         page(`
           const file = await until(() => app.vault.getFileByPath("Emoji.md"), 10000);
-          await app.workspace.getLeaf(false).openFile(file, { state: { mode: "source", source: false } });
-          await app.workspace.getLeaf("split", "vertical").openFile(file, { state: { mode: "preview" } });
-          app.workspace.setActiveLeaf(leafIn("source"), { focus: true });
-          return app.workspace.getLeavesOfType("markdown").map((l) => l.view.getMode()).sort();
+          const leaf = app.workspace.getLeaf(false);
+          await leaf.openFile(file, { state: { mode: "source", source: false } });
+          app.workspace.setActiveLeaf(leaf, { focus: true });
+          return noteLeaf().view.getMode();
         `),
         STEP_MS,
       );
-      expect(JSON.stringify(modes) === '["preview","source"]', `open leaves: ${JSON.stringify(modes)}`);
+      expect(mode === "source", `note opened in ${mode} mode`);
     },
   },
   {
@@ -71,28 +121,76 @@ const steps = [
     },
   },
   {
-    name: "render emoji and the slack block",
-    async run({ cdp }) {
-      const r = await cdp.evaluate(
+    name: "show emoji in live preview",
+    async run(session) {
+      const n = await session.cdp.evaluate(
+        page(`return await until(() => noteLeaf().view.editor.cm.contentDOM.querySelectorAll(".sf-emoji").length, 5000);`),
+        STEP_MS,
+      );
+      expect(n > 0, "no emoji in live preview");
+      await screenshot(session, "1-live-preview");
+    },
+  },
+  {
+    name: "show emoji and the slack block in reading view",
+    async run(session) {
+      const r = await session.cdp.evaluate(
         page(`
-          const count = () => ({
-            blocks: leafIn("preview").view.previewMode.containerEl.querySelectorAll(".sf-block").length,
-            readingEmoji: leafIn("preview").view.previewMode.containerEl.querySelectorAll(".sf-emoji").length,
-            livePreviewEmoji: leafIn("source").view.editor.cm.contentDOM.querySelectorAll(".sf-emoji").length,
-          });
-          await until(() => { const c = count(); return c.blocks && c.readingEmoji && c.livePreviewEmoji; }, 5000);
+          await setMode("preview");
+          const el = noteLeaf().view.previewMode.containerEl;
+          const count = () => ({ blocks: el.querySelectorAll(".sf-block").length, emoji: el.querySelectorAll(".sf-emoji").length });
+          await until(() => count().blocks && count().emoji, 5000);
           return count();
         `),
         STEP_MS,
       );
-      expect(r.blocks > 0 && r.readingEmoji > 0 && r.livePreviewEmoji > 0, `rendered: ${JSON.stringify(r)}`);
+      await screenshot(session, "2-reading");
+      await session.cdp.evaluate(page(`await setMode("source"); return 0;`), STEP_MS);
+      expect(r.blocks > 0 && r.emoji > 0, `reading view: ${JSON.stringify(r)}`);
+    },
+  },
+  {
+    name: "type :tad and pick from the emoji list",
+    async run(session) {
+      const { cdp } = session;
+      const original = await cdp.evaluate(
+        page(`
+          const editor = noteLeaf().view.editor;
+          const text = editor.getValue();
+          editor.focus();
+          const last = editor.lastLine();
+          editor.setCursor({ line: last, ch: editor.getLine(last).length });
+          editor.replaceSelection("\\n");
+          return text;
+        `),
+        STEP_MS,
+      );
+      await cdp.send("Input.insertText", { text: ":tad" });
+      const first = await cdp.evaluate(
+        page(`return (await until(() => document.querySelector(".suggestion-container .sf-suggest-item"), 3000))?.textContent ?? null;`),
+        STEP_MS,
+      );
+      await screenshot(session, "3-emoji-picker");
+      if (first) await pressKey(cdp, "Enter", "Enter", 13);
+      const line = await cdp.evaluate(
+        page(`
+          await sleep(200);
+          const editor = noteLeaf().view.editor;
+          const line = editor.getLine(editor.lastLine());
+          editor.setValue(${JSON.stringify(original)});
+          return line;
+        `),
+        STEP_MS,
+      );
+      expect(first?.includes(":tada:"), `emoji list: ${JSON.stringify(first)}`);
+      expect(line.trim() === ":tada:", `after picking, the line is ${JSON.stringify(line)}`);
     },
   },
   {
     name: "open the plugin's settings",
-    async run({ cdp }) {
+    async run(session) {
       // The 500 ms timer is a macrotask: it never fires while a promise loop (like #4) spins.
-      const items = await cdp.evaluate(
+      const items = await session.cdp.evaluate(
         page(`
           app.setting.open();
           app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
@@ -102,12 +200,14 @@ const steps = [
         `),
         STEP_MS,
       );
+      await screenshot(session, "4-settings");
       expect(items >= 5, `settings items: ${items}`);
     },
   },
   {
     name: "add a workspace",
-    async run({ cdp }) {
+    async run(session) {
+      const { cdp } = session;
       const r = await cdp.evaluate(
         page(`
           const el = app.setting.activeTab.containerEl;
@@ -115,23 +215,24 @@ const steps = [
           if (!button) return { error: "no Add workspace button" };
           button.click();
           await sleep(500);
-          const result = { workspaces: plugin().settings.workspaces.length, rows: el.querySelectorAll(".sf-workspace-setting").length };
-          app.setting.close();
-          return result;
+          return { workspaces: plugin().settings.workspaces.length, rows: el.querySelectorAll(".sf-workspace-setting").length };
         `),
         STEP_MS,
       );
+      await screenshot(session, "5-workspace-row");
+      await cdp.evaluate(page(`app.setting.close(); return 0;`), STEP_MS);
+      await closeModals(cdp);
       expect(!r.error && r.workspaces === 1 && r.rows === 1, JSON.stringify(r));
     },
   },
   {
-    name: "copy the note as Slack text (without touching the system clipboard)",
+    name: "copy the note as Slack text",
     async run({ cdp }) {
       // The plugin writes through a copy event. Answer execCommand("copy") with a synthetic event whose
-      // DataTransfer we keep, so the run never replaces what the developer has on their clipboard.
+      // DataTransfer we keep, so the run never replaces what is on the system clipboard.
       const r = await cdp.evaluate(
         page(`
-          app.workspace.setActiveLeaf(leafIn("source"), { focus: true });
+          app.workspace.setActiveLeaf(noteLeaf(), { focus: true });
           const original = document.execCommand;
           const captured = new DataTransfer();
           document.execCommand = (command, ...rest) => {
@@ -155,22 +256,52 @@ const steps = [
     },
   },
   {
-    name: "run the other commands",
+    name: "copy falls back to plain text when the platform refuses",
     async run({ cdp }) {
+      // What mobile WebViews do: no copy event, and the async API refuses rich content.
       const r = await cdp.evaluate(
         page(`
-          app.workspace.setActiveLeaf(leafIn("source"), { focus: true });
-          const ran = {};
-          for (const id of ["refresh-emoji", "switch-workspace", "import-thread"]) {
-            ran[id] = app.commands.executeCommandById(${JSON.stringify(PLUGIN_ID)} + ":" + id);
-            await sleep(200);
-            closeModals();
+          app.workspace.setActiveLeaf(noteLeaf(), { focus: true });
+          const exec = document.execCommand;
+          let written = null;
+          document.execCommand = (command, ...rest) => (command === "copy" ? false : exec.call(document, command, ...rest));
+          navigator.clipboard.write = () => Promise.reject(new Error("refused by the smoke test"));
+          navigator.clipboard.writeText = (text) => { written = text; return Promise.resolve(); };
+          try {
+            const ran = app.commands.executeCommandById(${JSON.stringify(PLUGIN_ID)} + ":copy-as-slack");
+            await until(() => written !== null, 2000);
+            const notice = [...document.querySelectorAll(".notice")].some((n) => n.textContent.includes(plugin().strings.copiedPlain));
+            return { ran, written, notice };
+          } finally {
+            document.execCommand = exec;
+            delete navigator.clipboard.write;
+            delete navigator.clipboard.writeText;
           }
-          return ran;
         `),
         STEP_MS,
       );
-      const failed = Object.entries(r).filter(([, ok]) => ok !== true);
+      expect(r.ran, "the command did not run");
+      expect(typeof r.written === "string" && r.written.includes(":tada:"), `plain text written: ${JSON.stringify(r.written?.slice(0, 120))}`);
+      expect(r.notice, "no notice saying only plain text was copied");
+    },
+  },
+  {
+    name: "run the other commands",
+    async run({ cdp }) {
+      const ran = {};
+      for (const id of ["refresh-emoji", "switch-workspace", "import-thread"]) {
+        ran[id] = await cdp.evaluate(
+          page(`
+            app.workspace.setActiveLeaf(noteLeaf(), { focus: true });
+            const ran = app.commands.executeCommandById(${JSON.stringify(PLUGIN_ID)} + ":${id}");
+            await sleep(300);
+            return ran;
+          `),
+          STEP_MS,
+        );
+        await closeModals(cdp);
+      }
+      const failed = Object.entries(ran).filter(([, ok]) => ok !== true);
       expect(!failed.length, `commands that did not run: ${failed.map(([id]) => id).join(", ")}`);
     },
   },
@@ -192,18 +323,35 @@ const steps = [
   },
 ];
 
-async function main() {
+/** One pass on a fresh sandbox. Returns true when every step passed and the plugin logged no error. */
+async function runPass(pass) {
   const sandbox = await createSandbox({ pluginDir });
-  console.log(`Obsidian: ${sandbox.bin}${sandbox.asar ? `\n  app package: ${sandbox.asar}` : ""}\nPlugin: ${pluginDir}`);
-
   const errors = [];
   let obsidian = null;
   const session = {
+    pass,
+    mobile: pass === "mobile",
     cdp: null,
     async start() {
       obsidian = await sandbox.launch();
       this.cdp = await connect(obsidian.port, LAUNCH_MS);
-      const boot = await this.cdp.evaluate(BOOT, LAUNCH_MS);
+      let boot = await this.cdp.evaluate(BOOT, LAUNCH_MS);
+      // A new vault with plugins gets "Do you trust the author of this vault?" a moment after startup.
+      // Plugins are already on (BOOT turned them on); the dialog would only take the keyboard focus.
+      await this.cdp.evaluate(page(`return !!(await until(() => document.querySelector(".mod-trust-folder"), 2000));`), STEP_MS);
+      await closeModals(this.cdp);
+      if (this.mobile) {
+        // Phone-sized first, so Obsidian picks its phone layout when it reloads into mobile mode.
+        await this.cdp.send("Emulation.setDeviceMetricsOverride", PHONE);
+        if (!boot.mobile) {
+          // emulateMobile() reloads the window: fire it and come back, never await across the reload.
+          await this.cdp.evaluate(`setTimeout(() => app.emulateMobile(true), 50), true`, STEP_MS);
+          await delay(500);
+          await waitAcrossReload(this.cdp, `document.body.classList.contains("is-mobile") && !!window.app?.workspace?.layoutReady`, LAUNCH_MS);
+          boot = await this.cdp.evaluate(BOOT, LAUNCH_MS);
+        }
+        expect(boot.mobile, "Obsidian did not switch to its mobile UI");
+      }
       return boot;
     },
     async stop() {
@@ -226,7 +374,7 @@ async function main() {
   let failed = false;
   try {
     const { version } = await session.start();
-    console.log(`Running Obsidian ${version}\n`);
+    console.log(`\n[${pass}] Obsidian ${version}${session.mobile ? ", mobile UI on a phone-sized window" : ""}`);
     for (const step of steps) {
       const started = Date.now();
       try {
@@ -239,7 +387,7 @@ async function main() {
       }
     }
   } catch (err) {
-    console.log(`  ✗ start Obsidian: ${err.message}`);
+    console.log(`\n[${pass}]\n  ✗ start Obsidian: ${err.message}`);
     failed = true;
   } finally {
     await session.stop();
@@ -247,16 +395,28 @@ async function main() {
 
   if (errors.length) {
     failed = true;
-    console.log(`\n  ✗ the plugin logged ${errors.length} error(s):`);
+    console.log(`  ✗ the plugin logged ${errors.length} error(s):`);
     for (const e of errors) console.log(`    ${e.split("\n").join("\n    ")}`);
   }
   if (failed) {
     const log = await readFile(join(sandbox.root, "obsidian.log"), "utf8").catch(() => "");
-    if (log.trim()) console.log(`\nLast lines of Obsidian's output:\n${log.trim().split("\n").slice(-30).join("\n")}`);
+    if (log.trim()) console.log(`\n  Last lines of Obsidian's output:\n${log.trim().split("\n").slice(-30).join("\n")}`);
   }
   await sandbox.dispose();
-  console.log(failed ? "\nSmoke test FAILED" : "\nSmoke test passed");
-  process.exitCode = failed ? 1 : 0;
+  return !failed;
+}
+
+async function main() {
+  const { bin, asar } = (await import("./sandbox.mjs")).findObsidian();
+  console.log(`Obsidian: ${bin}${asar ? `\n  app package: ${asar}` : ""}\nPlugin: ${pluginDir}`);
+  let ok = true;
+  for (const pass of passes) {
+    if (pass !== "desktop" && pass !== "mobile") throw new Error(`unknown pass "${pass}" in SMOKE_PASSES`);
+    ok = (await runPass(pass)) && ok;
+  }
+  if (screenshotDir) console.log(`\nScreenshots: ${screenshotDir}`);
+  console.log(ok ? "\nSmoke test passed" : "\nSmoke test FAILED");
+  process.exitCode = ok ? 0 : 1;
 }
 
 await main();
