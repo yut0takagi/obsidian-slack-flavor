@@ -63,6 +63,12 @@ async function pressKey(cdp, key, code, keyCode) {
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
 }
 
+async function click(cdp, x, y) {
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+}
+
 /** Closes whatever modal is open: the close button on desktop, Escape on mobile (no button there). */
 async function closeModals(cdp) {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -223,6 +229,100 @@ const steps = [
       await cdp.evaluate(page(`app.setting.close(); return 0;`), STEP_MS);
       await closeModals(cdp);
       expect(!r.error && r.workspaces === 1 && r.rows === 1, JSON.stringify(r));
+    },
+  },
+  {
+    name: "the block's refresh button stops before reading Slack",
+    async run({ cdp }) {
+      // Real mouse events: in live preview, a mousedown that reaches the editor would open the block for
+      // editing and the button would vanish before the click. Without a token and with the workspace's
+      // domain unknown, the plugin must stop at "domain not known" and never ask Slack anything.
+      for (const mode of ["source", "preview"]) {
+        const target = await cdp.evaluate(
+          page(`
+            await setMode(${JSON.stringify(mode)});
+            const view = noteLeaf().view;
+            if (view.getMode() === "source") view.editor.setCursor({ line: 0, ch: 0 });
+            const root = view.getMode() === "source" ? view.editor.cm.contentDOM : view.previewMode.containerEl;
+            const button = await until(() => root.querySelector(".sf-refresh"), 5000);
+            if (!button) return null;
+            button.scrollIntoView({ block: "center" });
+            await sleep(300);
+            const r = button.getBoundingClientRect();
+            const expected = plugin().strings.refreshUnknownDomain(plugin().settings.workspaces[0].name);
+            const before = [...document.querySelectorAll(".notice")].filter((n) => n.textContent === expected).length;
+            return { x: r.left + r.width / 2, y: r.top + r.height / 2, before };
+          `),
+          STEP_MS,
+        );
+        expect(target, `no refresh button in ${mode} mode`);
+        await click(cdp, target.x, target.y);
+        const notices = await cdp.evaluate(
+          page(`
+            const expected = plugin().strings.refreshUnknownDomain(plugin().settings.workspaces[0].name);
+            const texts = () => [...document.querySelectorAll(".notice")].map((n) => n.textContent);
+            await until(() => texts().filter((t) => t === expected).length > ${target.before}, 3000);
+            return { shown: texts().filter((t) => t === expected).length > ${target.before}, texts: texts() };
+          `),
+          STEP_MS,
+        );
+        expect(notices.shown, `${mode === "source" ? "live preview" : "reading view"}: notices ${JSON.stringify(notices.texts)}`);
+      }
+      await cdp.evaluate(page(`await setMode("source"); return 0;`), STEP_MS);
+    },
+  },
+  {
+    name: "the refresh button rewrites the block in place (Slack's answer stubbed)",
+    async run({ cdp }) {
+      // Only the network part is replaced: the button, finding the block, the edit and its checks are real.
+      // Reading view goes through vault.process, live preview through the editor (so undo works).
+      const original = await cdp.evaluate(page(`return await app.vault.read(noteLeaf().view.file);`), STEP_MS);
+      try {
+        for (const mode of ["preview", "source"]) {
+          const marker = `refreshed in ${mode}`;
+          const target = await cdp.evaluate(
+            page(`
+              await setMode(${JSON.stringify(mode)});
+              const p = plugin();
+              p.freshBlock = async () => ({ text: "\`\`\`slack\\nsource: https://example.slack.com/archives/C0123ABCD/p1790731800000100\\n\\n@bob 11:00\\n${marker}\\n\`\`\`", messages: 1 });
+              const view = noteLeaf().view;
+              if (view.getMode() === "source") view.editor.setCursor({ line: 0, ch: 0 });
+              const root = view.getMode() === "source" ? view.editor.cm.contentDOM : view.previewMode.containerEl;
+              const button = await until(() => root.querySelector(".sf-refresh"), 5000);
+              if (!button) return null;
+              button.scrollIntoView({ block: "center" });
+              await sleep(300);
+              const r = button.getBoundingClientRect();
+              return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+            `),
+            STEP_MS,
+          );
+          expect(target, `no refresh button in ${mode} mode`);
+          await click(cdp, target.x, target.y);
+          const r = await cdp.evaluate(
+            page(`
+              const view = noteLeaf().view;
+              const text = () => (view.getMode() === "source" ? view.editor.getValue() : app.vault.cachedRead(view.file));
+              for (let i = 0; i < 30 && !(await text()).includes(${JSON.stringify(marker)}); i++) await sleep(100);
+              await sleep(300);
+              const now = await text();
+              return { replaced: now.includes(${JSON.stringify(marker)}), blocks: now.split("\`\`\`slack").length - 1, keptRest: now.includes("Hello :tada:") };
+            `),
+            STEP_MS,
+          );
+          expect(r.replaced && r.blocks === 1 && r.keptRest, `${mode === "source" ? "live preview" : "reading view"}: ${JSON.stringify(r)}`);
+        }
+      } finally {
+        await cdp.evaluate(
+          page(`
+            delete plugin().freshBlock;
+            await setMode("source");
+            noteLeaf().view.editor.setValue(${JSON.stringify(original)});
+            return 0;
+          `),
+          STEP_MS,
+        );
+      }
     },
   },
   {

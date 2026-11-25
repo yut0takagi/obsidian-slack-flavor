@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockAt, findSlackBlocks } from "../src/block/locate";
+import { blockAt, blockUnchanged, findSlackBlocks, replaceBlock } from "../src/block/locate";
 
 const SRC = "source: https://acme.slack.com/archives/C1/p1790731800000100";
 const note = [
@@ -55,5 +55,32 @@ describe("blockAt", () => {
     expect(blockAt(blocks, 0)).toBeUndefined();
     expect(blockAt(blocks, 7)).toBeUndefined();
     expect(blockAt([blocks[0]], 0)).toBeUndefined();
+  });
+});
+
+describe("blockUnchanged / replaceBlock", () => {
+  const block = findSlackBlocks(note)[0];
+
+  it("replaces the block, fences included, when its lines are as they were read", () => {
+    expect(blockUnchanged(note, note, block)).toBe(true);
+    const fresh = "```slack\nnew\n```";
+    expect(replaceBlock([...note], note, block, fresh)).toEqual(["# Note", fresh, ...note.slice(7)]);
+  });
+
+  it("refuses when the block was edited", () => {
+    const edited = [...note];
+    edited[5] = "hi, edited";
+    expect(blockUnchanged(edited, note, block)).toBe(false);
+    expect(replaceBlock(edited, note, block, "```slack\nnew\n```")).toBeNull();
+  });
+
+  it("refuses when lines above it moved the block", () => {
+    const moved = ["inserted", ...note];
+    expect(blockUnchanged(moved, note, block)).toBe(false);
+    expect(replaceBlock(moved, note, block, "```slack\nnew\n```")).toBeNull();
+  });
+
+  it("refuses when the note got shorter than the block", () => {
+    expect(blockUnchanged(note.slice(0, 3), note, block)).toBe(false);
   });
 });

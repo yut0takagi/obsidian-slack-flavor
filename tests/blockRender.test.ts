@@ -41,6 +41,47 @@ describe("renderSlackBlock", () => {
     }
   });
 
+  describe("refresh button", () => {
+    const SOURCE = "source: https://acme.slack.com/archives/C1/p1790731800000100\n\n@a\nhi";
+    const strings = { replies: (n: number) => `${n}`, copy: "コピー", openInSlack: "Slackで開く", refresh: "再取得" };
+
+    it("appears next to the source link when the block can be refreshed", () => {
+      const el = render(SOURCE, { strings, onRefresh: () => {} });
+      const button = el.querySelector(".sf-header button.sf-refresh");
+      expect(button?.textContent).toBe("再取得");
+      expect(button?.getAttribute("type")).toBe("button");
+      expect(button?.previousElementSibling?.classList.contains("sf-source")).toBe(true);
+    });
+
+    it("is not shown without a handler or without a usable source line", () => {
+      expect(render(SOURCE, { strings }).querySelector(".sf-refresh")).toBeNull();
+      const noSource = render("channel: #general\n\n@a\nhi", { strings, onRefresh: () => {} });
+      expect(noSource.querySelector(".sf-refresh")).toBeNull();
+      const fake = render("source: https://example.com/archives/C1/p1790731800000100\n\n@a\nhi", { strings, onRefresh: () => {} });
+      expect(fake.querySelector(".sf-refresh")).toBeNull();
+    });
+
+    it("calls the handler without letting the click reach the editor, and is disabled until it finishes", async () => {
+      let finish = () => {};
+      const onRefresh = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+      const el = render(SOURCE, { strings, onRefresh });
+      const outside = vi.fn();
+      el.addEventListener("click", outside);
+      const button = el.querySelector<HTMLButtonElement>(".sf-refresh")!;
+
+      button.click();
+      button.click();
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      expect(outside).not.toHaveBeenCalled();
+      expect(button.disabled).toBe(true);
+
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(button.disabled).toBe(false);
+    });
+  });
+
   it("omits the header when there is nothing to show", () => {
     expect(render("@a\nhi").querySelector(".sf-header")).toBeNull();
   });
