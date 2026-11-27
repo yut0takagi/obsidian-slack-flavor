@@ -44,6 +44,18 @@ const PRELUDE = `
   }
 `;
 const page = (body) => `(async () => { ${PRELUDE} ${body} })()`;
+
+// Page-side helpers for the posting steps: pick a suggestion, find a modal's button or setting row.
+const POST_HELPERS = `
+  const s = () => plugin().strings;
+  const button = (text) => [...document.querySelectorAll(".modal-container button")].find((b) => b.textContent === text);
+  const row = (name) => [...document.querySelectorAll(".modal-container .setting-item")].find((r) => r.querySelector(".setting-item-name")?.textContent === name);
+  async function pick(text) {
+    const item = await until(() => [...document.querySelectorAll(".prompt .suggestion-item")].find((i) => i.textContent.includes(text)), 3000);
+    item?.click();
+    return !!item;
+  }
+`;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class StepFailure extends Error {}
@@ -449,6 +461,176 @@ const steps = [
       }
       const failed = Object.entries(ran).filter(([, ok]) => ok !== true);
       expect(!failed.length, `commands that did not run: ${failed.map(([id]) => id).join(", ")}`);
+    },
+  },
+  {
+    name: "posting commands exist only once posting is allowed",
+    async run({ cdp }) {
+      // From here on, Slack's Web API and the token are answered by the page: nothing reaches Slack.
+      const r = await cdp.evaluate(
+        page(`
+          app.workspace.setActiveLeaf(noteLeaf(), { focus: true });
+          const p = plugin();
+          const smoke = (window.__smokeSlack = { calls: [], scheduled: [], http: p.http });
+          p.tokenFor = () => "xoxp-smoke-not-a-token";
+          p.http = async (req) => {
+            const method = req.url.replace("https://slack.com/api/", "");
+            const params = Object.fromEntries(new URLSearchParams(req.body));
+            smoke.calls.push({ url: req.url, method, params });
+            const answers = {
+              "users.conversations": { channels: [{ id: "C0SMOKE", name: "general" }, { id: "G0SMOKE", name: "secret", is_private: true }] },
+              "chat.postMessage": { channel: params.channel, ts: "1790740000.000100" },
+              "chat.getPermalink": { permalink: "https://example.slack.com/archives/C0SMOKE/p1790740000000100" },
+              "chat.scheduleMessage": { scheduled_message_id: "Q0SMOKE", post_at: Number(params.post_at), channel: params.channel },
+              "chat.scheduledMessages.list": { scheduled_messages: smoke.scheduled },
+              "chat.deleteScheduledMessage": {},
+              "conversations.info": { channel: { id: params.channel, name: "general" } },
+            };
+            const json = req.url.startsWith("https://slack.com/api/") && method in answers ? { ok: true, ...answers[method] } : { ok: false, error: "smoke_unexpected" };
+            return { status: 200, headers: {}, json };
+          };
+          // listCommands() is what the command palette offers (it runs each command's check).
+          const offered = () => app.commands.listCommands().map((c) => c.id).filter((id) => /:(post-to-slack|scheduled-messages)$/.test(id)).sort();
+          const whenOff = offered();
+          app.commands.executeCommandById(${JSON.stringify(PLUGIN_ID)} + ":post-to-slack");
+          await sleep(300);
+          const openedWhenOff = !!document.querySelector(".prompt, .modal-container");
+          const callsWhenOff = smoke.calls.length;
+          p.settings.allowPosting = true;
+          p.settings.workspaces[0].domain = "example.slack.com";
+          return { whenOff, openedWhenOff, callsWhenOff, whenOn: offered() };
+        `),
+        STEP_MS,
+      );
+      expect(r.whenOff.length === 0, `offered while posting is off: ${JSON.stringify(r.whenOff)}`);
+      expect(!r.openedWhenOff && r.callsWhenOff === 0, `while off, running the command opened a dialog (${r.openedWhenOff}) or called Slack (${r.callsWhenOff})`);
+      expect(r.whenOn.length === 2, `offered once allowed: ${JSON.stringify(r.whenOn)}`);
+    },
+  },
+  {
+    name: "post: Cancel sends nothing, Post sends exactly the text shown (Slack stubbed)",
+    async run({ cdp }) {
+      const r = await cdp.evaluate(
+        page(`
+          ${POST_HELPERS}
+          const posts = () => window.__smokeSlack.calls.filter((c) => c.method === "chat.postMessage");
+          app.workspace.setActiveLeaf(noteLeaf(), { focus: true });
+
+          app.commands.executeCommandById(${JSON.stringify(PLUGIN_ID)} + ":post-to-slack");
+          if (!(await pick("#general"))) return { error: "#general is not in the channel list" };
+          if (!(await until(() => document.querySelector(".sf-post-preview"), 3000))) return { error: "no confirmation" };
+          button(s().cancel).click();
+          await sleep(300);
+          const afterCancel = posts().length;
+
+          app.commands.executeCommandById(${JSON.stringify(PLUGIN_ID)} + ":post-to-slack");
+          await pick("#general");
+          const preview = (await until(() => document.querySelector(".sf-post-preview"), 3000))?.textContent ?? null;
+          button(s().postButton).click();
+          await until(() => !document.querySelector(".sf-post-preview"), 3000);
+          const notice = await until(() => [...document.querySelectorAll(".notice")].some((n) => n.textContent.includes(s().posted("#general"))), 3000);
+          return { afterCancel, sent: posts().map((c) => c.params), preview, notice };
+        `),
+        STEP_MS,
+      );
+      await closeModals(cdp);
+      expect(!r.error, r.error);
+      expect(r.afterCancel === 0, `Cancel sent ${r.afterCancel} message(s)`);
+      expect(r.sent.length === 1 && r.sent[0].channel === "C0SMOKE" && !r.sent[0].thread_ts, `sent: ${JSON.stringify(r.sent)}`);
+      expect(r.sent[0].text === r.preview && r.preview.includes(":tada:"), "the text sent is not the text shown");
+      expect(r.notice, "no notice after posting");
+    },
+  },
+  {
+    name: "schedule a post, then unschedule it from the list (Slack stubbed)",
+    async run({ cdp }) {
+      const r = await cdp.evaluate(
+        page(`
+          ${POST_HELPERS}
+          const smoke = window.__smokeSlack;
+          app.workspace.setActiveLeaf(noteLeaf(), { focus: true });
+          app.commands.executeCommandById(${JSON.stringify(PLUGIN_ID)} + ":post-to-slack");
+          await pick("#general");
+          await until(() => document.querySelector(".sf-post-preview"), 3000);
+          row(s().postSchedule)?.querySelector(".checkbox-container")?.click();
+          const when = new Date(Date.now() + 2 * 3600_000);
+          when.setSeconds(0, 0);
+          const pad = (n) => String(n).padStart(2, "0");
+          const input = document.querySelector(".modal-container input.sf-post-when");
+          input.value = when.getFullYear() + "-" + pad(when.getMonth() + 1) + "-" + pad(when.getDate()) + "T" + pad(when.getHours()) + ":" + pad(when.getMinutes());
+          input.dispatchEvent(new Event("input"));
+          button(s().postScheduleButton).click();
+          await until(() => !document.querySelector(".sf-post-preview"), 3000);
+          const scheduled = smoke.calls.filter((c) => c.method === "chat.scheduleMessage").map((c) => c.params);
+          if (!scheduled.length) return { error: "nothing was scheduled" };
+
+          smoke.scheduled = [{ id: "Q0SMOKE", channel_id: "C0SMOKE", post_at: Number(scheduled[0].post_at), text: scheduled[0].text }];
+          app.commands.executeCommandById(${JSON.stringify(PLUGIN_ID)} + ":scheduled-messages");
+          const remove = await until(() => button(s().scheduledRemove), 3000);
+          const listed = document.querySelector(".sf-scheduled-row .setting-item-name")?.textContent ?? null;
+          remove?.click();
+          await until(() => smoke.calls.some((c) => c.method === "chat.deleteScheduledMessage"), 3000);
+          await sleep(200);
+          return {
+            scheduled,
+            expected: Math.floor(when.getTime() / 1000),
+            listed,
+            deleted: smoke.calls.filter((c) => c.method === "chat.deleteScheduledMessage").map((c) => c.params),
+            rowsLeft: document.querySelectorAll(".sf-scheduled-row").length,
+          };
+        `),
+        STEP_MS,
+      );
+      await closeModals(cdp);
+      expect(!r.error, r.error);
+      expect(r.scheduled.length === 1 && r.scheduled[0].channel === "C0SMOKE" && Number(r.scheduled[0].post_at) === r.expected, `scheduled: ${JSON.stringify(r.scheduled)}, expected post_at ${r.expected}`);
+      expect(r.listed?.includes("#general"), `listed as ${JSON.stringify(r.listed)}`);
+      expect(JSON.stringify(r.deleted) === '[{"channel":"C0SMOKE","scheduled_message_id":"Q0SMOKE"}]' && r.rowsLeft === 0, `deleted: ${JSON.stringify(r.deleted)}, rows left ${r.rowsLeft}`);
+    },
+  },
+  {
+    name: "reply in a thread from a message link; another workspace's link is refused (Slack stubbed)",
+    async run({ cdp }) {
+      const r = await cdp.evaluate(
+        page(`
+          ${POST_HELPERS}
+          const smoke = window.__smokeSlack;
+          const p = plugin();
+          const posts = () => smoke.calls.filter((c) => c.method === "chat.postMessage");
+          const enterLink = async (link) => {
+            app.commands.executeCommandById(${JSON.stringify(PLUGIN_ID)} + ":post-to-slack");
+            await pick(s().postReplyInThread);
+            const input = await until(() => document.querySelector(".modal-container input.sf-import-link"), 3000);
+            input.value = link;
+            input.dispatchEvent(new Event("input"));
+            button(s().postThreadLinkButton).click();
+          };
+          try {
+            app.workspace.setActiveLeaf(noteLeaf(), { focus: true });
+            const before = posts().length;
+            await enterLink("https://other-team.slack.com/archives/C0OTHER/p1790731800000100");
+            const refused = await until(() => [...document.querySelectorAll(".notice")].some((n) => n.textContent.includes(s().refreshOtherWorkspace("other-team.slack.com", p.settings.workspaces[0].name))), 3000);
+            const confirmAfterRefusal = !!document.querySelector(".sf-post-preview");
+
+            await enterLink("https://example.slack.com/archives/C0SMOKE/p1790731800000100");
+            await until(() => document.querySelector(".sf-post-preview"), 3000);
+            const where = row(s().postWhere)?.querySelector(".setting-item-description")?.textContent ?? null;
+            button(s().postButton).click();
+            await until(() => !document.querySelector(".sf-post-preview"), 3000);
+            return { refused, confirmAfterRefusal, where, sent: posts().slice(before).map((c) => c.params), offSlack: smoke.calls.filter((c) => !c.url.startsWith("https://slack.com/api/")).length };
+          } finally {
+            p.http = smoke.http;
+            delete p.tokenFor;
+            p.settings.allowPosting = false;
+          }
+        `),
+        STEP_MS,
+      );
+      await closeModals(cdp);
+      expect(r.refused && !r.confirmAfterRefusal, `another workspace's link: refused ${r.refused}, confirmation shown ${r.confirmAfterRefusal}`);
+      expect(r.where?.includes("#general"), `destination shown as ${JSON.stringify(r.where)}`);
+      expect(r.sent.length === 1 && r.sent[0].channel === "C0SMOKE" && r.sent[0].thread_ts === "1790731800.000100", `sent: ${JSON.stringify(r.sent)}`);
+      expect(r.offSlack === 0, "a request went somewhere other than slack.com/api");
     },
   },
   {
