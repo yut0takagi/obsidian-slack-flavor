@@ -51,6 +51,20 @@ export interface AuthInfo {
   user_id: string;
 }
 
+export interface SlackChannel {
+  id: string;
+  name: string;
+  private: boolean;
+}
+
+export interface ScheduledMessage {
+  id: string;
+  channel: string;
+  /** Unix seconds. */
+  postAt: number;
+  text: string;
+}
+
 export class SlackApiError extends Error {
   constructor(
     readonly method: string,
@@ -135,6 +149,68 @@ export class SlackClient {
       this.users.set(id, name);
     }
     return name;
+  }
+
+  /** Public and private channels the token's user is in (where they can post). */
+  async memberChannels(): Promise<SlackChannel[]> {
+    const channels: SlackChannel[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.call<{ channels: { id: string; name: string; is_private?: boolean }[]; response_metadata?: { next_cursor?: string } }>(
+        "users.conversations",
+        { types: "public_channel,private_channel", exclude_archived: "true", limit: PAGE_SIZE, cursor },
+      );
+      for (const c of page.channels) channels.push({ id: c.id, name: c.name, private: !!c.is_private });
+      cursor = page.response_metadata?.next_cursor || undefined;
+    } while (cursor);
+    return channels;
+  }
+
+  /**
+   * Posts as the token's user. A network error is not retried (the message may already be posted);
+   * only Slack's own 429, which means nothing was done, is.
+   */
+  async postMessage(channel: string, text: string, threadTs?: string): Promise<{ channel: string; ts: string }> {
+    const res = await this.call<{ channel: string; ts: string }>("chat.postMessage", { channel, text, thread_ts: threadTs });
+    return { channel: res.channel, ts: res.ts };
+  }
+
+  /** `postAt` is Unix seconds. */
+  async scheduleMessage(channel: string, text: string, postAt: number, threadTs?: string): Promise<{ id: string; postAt: number }> {
+    const res = await this.call<{ scheduled_message_id: string; post_at: number }>("chat.scheduleMessage", {
+      channel,
+      text,
+      post_at: postAt,
+      thread_ts: threadTs,
+    });
+    return { id: res.scheduled_message_id, postAt: res.post_at };
+  }
+
+  /** Messages this token scheduled that have not been sent yet. */
+  async scheduledMessages(): Promise<ScheduledMessage[]> {
+    const out: ScheduledMessage[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.call<{
+        scheduled_messages: { id: string; channel_id: string; post_at: number; text?: string }[];
+        response_metadata?: { next_cursor?: string };
+      }>("chat.scheduledMessages.list", { limit: PAGE_SIZE, cursor });
+      for (const m of page.scheduled_messages) out.push({ id: m.id, channel: m.channel_id, postAt: m.post_at, text: m.text ?? "" });
+      cursor = page.response_metadata?.next_cursor || undefined;
+    } while (cursor);
+    return out;
+  }
+
+  async deleteScheduledMessage(channel: string, id: string): Promise<void> {
+    await this.call("chat.deleteScheduledMessage", { channel, scheduled_message_id: id });
+  }
+
+  async permalink(channel: string, ts: string): Promise<string | undefined> {
+    try {
+      return (await this.call<{ permalink: string }>("chat.getPermalink", { channel, message_ts: ts })).permalink;
+    } catch {
+      return undefined;
+    }
   }
 
   async channelName(id: string): Promise<string | undefined> {
