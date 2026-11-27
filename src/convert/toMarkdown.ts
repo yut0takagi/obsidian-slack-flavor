@@ -4,7 +4,7 @@
  * plain text in Slack (e.g. `*` glued to Japanese) is escaped rather than turned into formatting.
  */
 
-import type { SlackBlock, SlackMessage } from "../block/parse";
+import { splitImageEmbeds, type SlackBlock, type SlackMessage } from "../block/parse";
 import { parseMrkdwn, type Block, type Inline, type ParseOptions } from "../mrkdwn/parse";
 import { parsePermalink } from "../slack/permalink";
 
@@ -30,7 +30,10 @@ export function slackBlockToMarkdown(block: SlackBlock, opts: ParseOptions = {})
   if (block.text) add(mrkdwnToMarkdown(block.text, opts).split("\n"));
   const write = (msg: SlackMessage, reply: boolean) => {
     const lines = [`${reply ? "↳ " : ""}**${escapeText(msg.author)}**${msg.time ? ` ${msg.time}` : ""}`];
-    if (msg.body) lines.push(...mrkdwnToMarkdown(msg.body, opts).split("\n"));
+    // Saved images stay embeds (the link text cannot hold ] | # ^ or a newline, so it needs no escaping).
+    const { text, images } = splitImageEmbeds(msg.body);
+    if (text.trim()) lines.push(...mrkdwnToMarkdown(text, opts).split("\n"));
+    for (const image of images) lines.push(`![[${image}]]`);
     if (msg.reactions.length) lines.push(msg.reactions.map((r) => `${r.emoji} ${r.count}`).join(" · "));
     add(lines);
     for (const r of msg.replies) write(r, true);

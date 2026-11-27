@@ -82,6 +82,30 @@ describe("renderSlackBlock", () => {
     });
   });
 
+  describe("images", () => {
+    const resolveImage = (link: string) => (link === "slack-F1.png" ? "app://local/vault/slack-F1.png" : null);
+
+    it("shows an embedded image from the vault below the message text", () => {
+      const el = render("@a 9:00\n見て\n![[slack-F1.png]]", { resolveImage });
+      const img = el.querySelector(".sf-message .sf-attachments img.sf-attachment");
+      expect(img?.getAttribute("src")).toBe("app://local/vault/slack-F1.png");
+      expect(img?.getAttribute("alt")).toBe("slack-F1.png");
+      expect(texts(el, ".sf-body")).toEqual(["見て"]);
+    });
+
+    it("keeps the line as text when the image is not in the vault or images are not resolved", () => {
+      expect(render("@a 9:00\n![[missing.png]]", { resolveImage }).querySelector(".sf-body")?.textContent).toBe("![[missing.png]]");
+      expect(render("@a 9:00\n![[slack-F1.png]]").querySelector("img")).toBeNull();
+    });
+
+    it("copies a message without its image lines", () => {
+      const onCopy = vi.fn();
+      const el = render("@a 9:00\n見て\n![[slack-F1.png]]", { resolveImage, onCopy });
+      el.querySelector<HTMLButtonElement>(".sf-message .sf-copy")!.click();
+      expect(onCopy).toHaveBeenCalledWith("見て");
+    });
+  });
+
   it("omits the header when there is nothing to show", () => {
     expect(render("@a\nhi").querySelector(".sf-header")).toBeNull();
   });

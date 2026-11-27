@@ -1,5 +1,5 @@
 import type { SlackBlock, SlackBlockMeta, SlackMessage } from "../block/parse";
-import type { SlackApiMessage } from "./client";
+import type { SlackApiMessage, SlackFile } from "./client";
 
 export interface ThreadToBlockDeps {
   userName: (id: string) => Promise<string>;
@@ -12,6 +12,11 @@ export interface ThreadToBlockDeps {
   title?: string;
   /** Link to the thread, written as `source:` so the block can be refreshed later. */
   source?: string;
+  /**
+   * Saves an attached file into the vault when it is an image worth keeping and returns the link text
+   * to embed (`![[…]]`), or null to keep the file as a link. Without it every file stays a link.
+   */
+  saveImage?: (file: SlackFile) => Promise<string | null>;
 }
 
 const USER_MENTION = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g;
@@ -35,7 +40,10 @@ export async function threadToSlackBlock(messages: SlackApiMessage[], deps: Thre
   for (const msg of messages) {
     const reply = msg.ts !== rootTs && msg.thread_ts === rootTs;
     const body = [await resolveMentions(msg.text ?? "", deps)];
-    for (const f of msg.files ?? []) body.push(`📎 <${f.permalink}|${f.title || f.name || "file"}>`);
+    for (const f of msg.files ?? []) {
+      const image = deps.saveImage ? await deps.saveImage(f) : null;
+      body.push(image ? `![[${image}]]` : `📎 <${f.permalink}|${f.title || f.name || "file"}>`);
+    }
     const message: SlackMessage = {
       author: await authorOf(msg, deps),
       time: formatTs(msg.ts, deps.timeZone),

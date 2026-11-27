@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlackBlock } from "../src/block/parse";
+import { parseSlackBlock, splitImageEmbeds } from "../src/block/parse";
 
 describe("parseSlackBlock", () => {
   it("reads meta lines, messages, reactions and thread replies", () => {
@@ -104,5 +104,16 @@ describe("parseSlackBlock", () => {
 
   it("handles CRLF", () => {
     expect(parseSlackBlock("@a 1:00\r\nhi\r\n").messages[0]).toMatchObject({ author: "a", body: "hi" });
+  });
+});
+
+describe("splitImageEmbeds", () => {
+  it("takes out lines that are only an image embed, keeping the text in order", () => {
+    expect(splitImageEmbeds("見て\n![[slack-F1.png]]\nもう一枚\n![[a b.jpg|300]]")).toEqual({ text: "見て\nもう一枚", images: ["slack-F1.png", "a b.jpg"] });
+  });
+
+  it("leaves embeds inside a line, and links that are not embeds, as text", () => {
+    const body = "see ![[a.png]] here\n[[a.png]]\n![](a.png)";
+    expect(splitImageEmbeds(body)).toEqual({ text: body, images: [] });
   });
 });

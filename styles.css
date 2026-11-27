@@ -390,3 +390,20 @@ img.sf-emoji {
   width: 100%;
   min-width: 280px;
 }
+
+/* ---------- attached images ---------- */
+
+.sf-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.sf-attachment {
+  max-width: 100%;
+  max-height: 360px;
+  border: 1px solid var(--sf-subtle-border);
+  border-radius: 6px;
+  object-fit: contain;
+}

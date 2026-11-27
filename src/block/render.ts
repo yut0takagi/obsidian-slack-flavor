@@ -2,7 +2,7 @@ import { append } from "../dom";
 import { parseInline, parseMrkdwn, type ParseOptions } from "../mrkdwn/parse";
 import { createEmojiEl, isEmojiOnly, renderBlocks, type RenderContext } from "../mrkdwn/render";
 import { parsePermalink } from "../slack/permalink";
-import type { SlackBlock, SlackMessage } from "./parse";
+import { imageEmbedLink, type SlackBlock, type SlackMessage } from "./parse";
 
 export interface BlockRenderContext extends RenderContext {
   strings: { replies: (count: number) => string; copy: string; openInSlack?: string; refresh?: string };
@@ -12,6 +12,8 @@ export interface BlockRenderContext extends RenderContext {
   onCopy?: (mrkdwn: string) => void;
   /** When set, a block with a Slack source link gets a refresh button that calls this. */
   onRefresh?: () => void | Promise<void>;
+  /** URL of an image in the vault for an `![[…]]` line, or null when there is none. */
+  resolveImage?: (link: string) => string | null;
 }
 
 const AVATAR_COLORS = 8;
@@ -104,12 +106,23 @@ function renderMessage(msg: SlackMessage, parent: HTMLElement, ctx: BlockRenderC
     append(meta, "span", "sf-author").textContent = msg.author;
     if (time) append(meta, "span", "sf-time").textContent = time;
   }
-  if (ctx.onCopy && msg.body) copyButton(el, msg.body, ctx);
+  const { text, images } = splitBody(msg.body, ctx);
+  if (ctx.onCopy && text) copyButton(el, text, ctx);
 
   const body = append(content, "div", "sf-body");
-  const blocks = parseMrkdwn(msg.body, ctx.parseOptions);
+  const blocks = parseMrkdwn(text, ctx.parseOptions);
   if (isEmojiOnly(blocks, ctx)) body.classList.add("sf-jumbo");
   renderBlocks(blocks, body, ctx);
+
+  if (images.length) {
+    const row = append(content, "div", "sf-attachments");
+    for (const image of images) {
+      const img = append(row, "img", "sf-attachment");
+      img.setAttribute("src", image.src);
+      img.setAttribute("alt", image.link);
+      img.setAttribute("loading", "lazy");
+    }
+  }
 
   if (msg.reactions.length) {
     const row = append(content, "div", "sf-reactions");
@@ -128,6 +141,20 @@ function renderMessage(msg: SlackMessage, parent: HTMLElement, ctx: BlockRenderC
     append(thread, "div", "sf-thread-summary").textContent = ctx.strings.replies(msg.replies.length);
     for (const r of msg.replies) renderMessage(r, thread, ctx, false, true);
   }
+}
+
+/** The body's mrkdwn and the images found in the vault; an image that is not found stays as text. */
+function splitBody(body: string, ctx: BlockRenderContext): { text: string; images: { link: string; src: string }[] } {
+  if (!ctx.resolveImage) return { text: body, images: [] };
+  const text: string[] = [];
+  const images: { link: string; src: string }[] = [];
+  for (const line of body.split("\n")) {
+    const link = imageEmbedLink(line);
+    const src = link ? ctx.resolveImage(link) : null;
+    if (link && src) images.push({ link, src });
+    else text.push(line);
+  }
+  return { text: text.join("\n").replace(/^\n+|\n+$/g, ""), images };
 }
 
 function renderMrkdwn(src: string, parent: HTMLElement, ctx: BlockRenderContext): void {

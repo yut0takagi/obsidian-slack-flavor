@@ -49,7 +49,7 @@ const en = {
   switchPlaceholder: "Choose the default workspace",
   settingsWorkspaces: "Workspaces",
   settingsWorkspacesDesc:
-    "Each workspace needs a Slack token stored in Obsidian's secret storage. Scopes: emoji:read to show custom emoji; channels:history, groups:history, im:history, mpim:history, users:read, channels:read, groups:read to import threads.",
+    "Each workspace needs a Slack token stored in Obsidian's secret storage. Scopes: emoji:read to show custom emoji; channels:history, groups:history, im:history, mpim:history, users:read, channels:read, groups:read to import threads; files:read to also save attached images.",
   settingsName: "Name",
   settingsToken: "Token",
   settingsFetch: "Fetch emoji",
@@ -69,6 +69,11 @@ const en = {
   settingsCacheClear: "Clear cache",
   cacheCleared: "Emoji image cache cleared",
   settingsImport: "Importing threads",
+  settingsImportImages: "Save attached images",
+  settingsImportImagesDesc:
+    "Images attached to imported messages (PNG, JPEG, GIF, WebP up to 20 MB) are downloaded from files.slack.com with your token and saved like other attachments (Settings → Files and links). Other files stay as links. Needs the files:read scope.",
+  imagesNotSaved: (n: number, scope: boolean) =>
+    `${n} attached ${n === 1 ? "image" : "images"} could not be saved and ${n === 1 ? "stays a link" : "stay links"}.${scope ? " The token may lack the files:read scope." : ""}`,
   settingsImportFormat: "Insert threads as",
   settingsImportFormatDesc:
     "A ```slack block looks like Slack and can be refreshed later. Markdown works in any app; its custom emoji use the note's workspace.",
@@ -142,7 +147,7 @@ const ja: Strings = {
   switchPlaceholder: "既定のワークスペースを選ぶ",
   settingsWorkspaces: "ワークスペース",
   settingsWorkspacesDesc:
-    "ワークスペースごとに、Slackのトークンを Obsidian のシークレットストレージに登録します。スコープ: カスタム絵文字の表示に emoji:read、スレッドの取り込みに channels:history, groups:history, im:history, mpim:history, users:read, channels:read, groups:read。",
+    "ワークスペースごとに、Slackのトークンを Obsidian のシークレットストレージに登録します。スコープ: カスタム絵文字の表示に emoji:read、スレッドの取り込みに channels:history, groups:history, im:history, mpim:history, users:read, channels:read, groups:read、添付画像も保存するなら files:read。",
   settingsName: "名前",
   settingsToken: "トークン",
   settingsFetch: "絵文字を取得",
@@ -161,6 +166,10 @@ const ja: Strings = {
   settingsCacheClear: "キャッシュを消去",
   cacheCleared: "絵文字画像のキャッシュを消去しました",
   settingsImport: "スレッドの取り込み",
+  settingsImportImages: "添付画像を保管庫に保存",
+  settingsImportImagesDesc:
+    "取り込んだメッセージに添付された画像（PNG・JPEG・GIF・WebP、20 MB まで）を、あなたのトークンで files.slack.com から取得し、ほかの添付ファイルと同じ場所（設定 → ファイルとリンク）に保存します。画像以外のファイルはリンクのままです。files:read スコープが必要です。",
+  imagesNotSaved: (n, scope) => `添付画像 ${n} 件を保存できなかったため、リンクのまま残しました。${scope ? "トークンに files:read スコープがない可能性があります。" : ""}`,
   settingsImportFormat: "スレッドの挿入形式",
   settingsImportFormatDesc:
     "```slack ブロックは Slack と同じ見た目で、あとから再取得できます。Markdown はどのアプリでも読めますが、カスタム絵文字はノートのワークスペースのものを使います。",

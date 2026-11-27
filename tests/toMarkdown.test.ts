@@ -93,6 +93,10 @@ describe("slackBlockToMarkdown", () => {
     expect(slackBlockToMarkdown(parseSlackBlock("title: 定例\nsource: javascript:alert(1)\n\n@a\nhi")).split("\n")[0]).toBe("> [!quote] 定例");
   });
 
+  it("keeps image embeds as embeds instead of escaping them", () => {
+    expect(slackBlockToMarkdown(parseSlackBlock("@a 9:00\n*見て*\n![[slack-F1.png]]"))).toBe("> [!quote]\n> **a** 9:00\n> **見て**\n> ![[slack-F1.png]]");
+  });
+
   it("converts a block without messages as a single message", () => {
     expect(slackBlockToMarkdown(parseSlackBlock("*太字*\n\n次の段落"))).toBe("> [!quote]\n> **太字**\n>\n> 次の段落");
   });

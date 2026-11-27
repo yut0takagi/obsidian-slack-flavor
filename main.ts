@@ -12,7 +12,7 @@ import { emojiLivePreview } from "./src/obsidian/livePreview";
 import { EmojiSuggest } from "./src/obsidian/emojiSuggest";
 import { browserClipboardWriters, copyWithFallback } from "./src/obsidian/clipboard";
 import { confirmRefresh } from "./src/obsidian/confirmRefreshModal";
-import { obsidianHttp, obsidianImageFetch } from "./src/obsidian/http";
+import { obsidianFileFetch, obsidianHttp, obsidianImageFetch } from "./src/obsidian/http";
 import { ImportModal } from "./src/obsidian/importModal";
 import { renderNoteEmoji } from "./src/obsidian/readingView";
 import { SlackFlavorSettingTab } from "./src/obsidian/settingsTab";
@@ -25,7 +25,8 @@ import {
   type SlackFlavorSettings,
   type WorkspaceConfig,
 } from "./src/settings";
-import { SlackApiError, SlackClient } from "./src/slack/client";
+import { SlackApiError, SlackClient, type SlackFile } from "./src/slack/client";
+import { checkImageResponse, type FileFetch, imageDownloadUrl, imageFileName } from "./src/slack/files";
 import { describeError } from "./src/slack/errors";
 import { parsePermalink, threadPermalink } from "./src/slack/permalink";
 import { checkRefreshSource, refreshSummary } from "./src/slack/refresh";
@@ -43,11 +44,19 @@ interface FreshBlock {
   messages: number;
 }
 
+/** Images shown from `![[…]]` lines in a block; anything else in the vault stays text. */
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg"]);
+
+/** Why attached images were not saved during one import or refresh ("login": probably no files:read). */
+type ImageFailures = string[];
+
 export default class SlackFlavorPlugin extends Plugin {
   override settings: SlackFlavorSettings = structuredClone(DEFAULT_SETTINGS);
   strings: Strings = createStrings("en");
   store!: EmojiStore;
   imageCache!: EmojiImageCache;
+  /** Downloads Slack files with the token; a field so the smoke test can answer for Slack. */
+  fileFetch: FileFetch = obsidianFileFetch;
   private statusBar: HTMLElement | null = null;
 
   override async onload(): Promise<void> {
@@ -202,6 +211,10 @@ export default class SlackFlavorPlugin extends Plugin {
     const label = block.meta.workspace ? (workspace?.name ?? `${block.meta.workspace} (?)`) : undefined;
     renderSlackBlock(block, el, {
       resolveEmoji: this.resolverFor(workspace),
+      resolveImage: (link) => {
+        const file = this.app.metadataCache.getFirstLinkpathDest(link, ctx.sourcePath);
+        return file && IMAGE_EXTENSIONS.has(file.extension.toLowerCase()) ? this.app.vault.getResourcePath(file) : null;
+      },
       strings: this.strings,
       workspaceLabel: label,
       parseOptions: { strict: this.settings.strictBoundaries },
@@ -248,17 +261,20 @@ export default class SlackFlavorPlugin extends Plugin {
         const rootTs = messages[0]?.thread_ts ?? messages[0]?.ts ?? permalink.threadTs ?? permalink.ts;
         // app.slack.com links work only in the browser client; prefer the workspace's own domain.
         const domain = permalink.domain === "app.slack.com" ? (workspace.domain ?? permalink.domain) : permalink.domain;
+        const failures: ImageFailures = [];
         const block = await threadToSlackBlock(messages, {
           userName: (id) => client.userName(id),
           channelName: (id) => client.channelName(id),
           channel: await client.channelName(permalink.channel),
           workspace: workspace.id === this.workspaceForPath(file?.path ?? "")?.id ? undefined : workspace.name,
           source: threadPermalink(domain, permalink.channel, rootTs) ?? undefined,
+          saveImage: this.imageSaver(token, file?.path ?? "", failures),
         });
         const text = format === "markdown" ? slackBlockToMarkdown(block, { strict: this.settings.strictBoundaries }) : formatSlackBlock(block);
         editor.replaceSelection(`${text}\n`);
         notice.setMessage(this.strings.imported(messages.length));
         window.setTimeout(() => notice.hide(), 3000);
+        this.reportImageFailures(failures);
         return true;
       } catch (err) {
         notice.hide();
@@ -362,6 +378,7 @@ export default class SlackFlavorPlugin extends Plugin {
     const notice = new Notice(s.refreshing, 0);
     try {
       const messages = await client.replies(permalink.channel, permalink.threadTs ?? permalink.ts);
+      const failures: ImageFailures = [];
       const text = await threadToBlock(messages, {
         userName: (id) => client.userName(id),
         channelName: (id) => client.channelName(id),
@@ -369,7 +386,9 @@ export default class SlackFlavorPlugin extends Plugin {
         workspace: meta.workspace,
         title: meta.title,
         source: meta.source,
+        saveImage: this.imageSaver(token, sourcePath, failures),
       });
+      this.reportImageFailures(failures);
       return { text, messages: messages.length };
     } catch (err) {
       new Notice(describeError(err, s));
@@ -377,6 +396,42 @@ export default class SlackFlavorPlugin extends Plugin {
     } finally {
       notice.hide();
     }
+  }
+
+  /** The image saver for one import or refresh, when saving attached images is turned on. */
+  private imageSaver(token: string, sourcePath: string, failures: ImageFailures): ((file: SlackFile) => Promise<string | null>) | undefined {
+    return this.settings.importImages ? (file) => this.saveSlackImage(file, token, sourcePath, failures) : undefined;
+  }
+
+  /**
+   * Saves an image attached to a Slack message as an attachment of the note and returns the link text
+   * to embed, or null to keep it a link. An image saved before (same Slack file id) is reused. Only
+   * URLs from Slack's API reach here, and the download itself refuses anything but files.slack.com.
+   */
+  async saveSlackImage(file: SlackFile, token: string, sourcePath: string, failures: ImageFailures): Promise<string | null> {
+    const name = imageFileName(file);
+    const url = imageDownloadUrl(file);
+    if (!name || !url) return null;
+    const existing = this.app.metadataCache.getFirstLinkpathDest(name, sourcePath);
+    if (existing) return this.app.metadataCache.fileToLinktext(existing, sourcePath, true);
+    try {
+      const res = await this.fileFetch(url, token);
+      const check = checkImageResponse(res);
+      if (!check.ok) {
+        failures.push(check.reason);
+        return null;
+      }
+      const path = await this.app.fileManager.getAvailablePathForAttachment(name, sourcePath);
+      const saved = await this.app.vault.createBinary(path, res.data);
+      return this.app.metadataCache.fileToLinktext(saved, sourcePath, true);
+    } catch {
+      failures.push("error");
+      return null;
+    }
+  }
+
+  private reportImageFailures(failures: ImageFailures): void {
+    if (failures.length) new Notice(this.strings.imagesNotSaved(failures.length, failures.includes("login")), 8000);
   }
 
   // --- plumbing -------------------------------------------------------------

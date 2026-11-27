@@ -80,6 +80,22 @@ describe("threadToBlock", () => {
     expect(out).toContain("@Deploy Bot 2026-09-30 10:30\ndone\n📎 <https://x.slack.com/files/1|log.txt>");
   });
 
+  it("embeds the images it could save and keeps the other files as links", async () => {
+    const files = [
+      { id: "F1", name: "shot.png", mimetype: "image/png", permalink: "https://x.slack.com/files/1" },
+      { id: "F2", name: "report.pdf", mimetype: "application/pdf", permalink: "https://x.slack.com/files/2" },
+      { id: "F3", name: "hidden.png", mimetype: "image/png", permalink: "https://x.slack.com/files/3" },
+    ];
+    const asked: string[] = [];
+    const saveImage = async (f: { id?: string }) => {
+      asked.push(f.id ?? "");
+      return f.id === "F1" ? "slack-F1.png" : null;
+    };
+    const out = await threadToBlock([{ ts: ROOT, user: "U1", text: "見て", files }], { ...deps, saveImage });
+    expect(asked).toEqual(["F1", "F2", "F3"]);
+    expect(out).toContain("見て\n![[slack-F1.png]]\n📎 <https://x.slack.com/files/2|report.pdf>\n📎 <https://x.slack.com/files/3|hidden.png>");
+  });
+
   it("uses a longer fence when a message contains ```", async () => {
     const out = await threadToBlock([{ ts: ROOT, user: "U1", text: "```code```" }], deps);
     expect(out.startsWith("````slack\n")).toBe(true);
