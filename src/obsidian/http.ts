@@ -1,6 +1,7 @@
 import { requestUrl } from "obsidian";
 import type { HttpFn } from "../slack/client";
 import type { ImageFetch } from "../store/imageCache";
+import { isSlackFileUrl, type FileFetch } from "../slack/files";
 
 /** requestUrl bypasses CORS, which Slack's Web API does not allow from app://obsidian.md. */
 export const obsidianHttp: HttpFn = async (req) => {
@@ -20,6 +21,14 @@ export const obsidianHttp: HttpFn = async (req) => {
 /** Plain GET for emoji images. No Authorization header: the image host never sees the token. */
 export const obsidianImageFetch: ImageFetch = async (url) => {
   const res = await requestUrl({ url, method: "GET", throw: false });
+  const type = Object.entries(res.headers ?? {}).find(([k]) => k.toLowerCase() === "content-type")?.[1];
+  return { status: res.status, contentType: type, data: res.arrayBuffer };
+};
+
+/** GET for a Slack file, with the token. Refuses anything but https://files.slack.com, whatever the caller passes. */
+export const obsidianFileFetch: FileFetch = async (url, token) => {
+  if (!isSlackFileUrl(url)) throw new Error("Refusing to send the Slack token outside https://files.slack.com");
+  const res = await requestUrl({ url, method: "GET", headers: { Authorization: `Bearer ${token}` }, throw: false });
   const type = Object.entries(res.headers ?? {}).find(([k]) => k.toLowerCase() === "content-type")?.[1];
   return { status: res.status, contentType: type, data: res.arrayBuffer };
 };

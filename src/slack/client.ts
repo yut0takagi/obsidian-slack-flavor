@@ -26,7 +26,22 @@ export interface SlackApiMessage {
   subtype?: string;
   thread_ts?: string;
   reactions?: { name: string; count: number }[];
-  files?: { name?: string; title?: string; permalink?: string }[];
+  files?: SlackFile[];
+}
+
+/** The parts of a Slack file object the plugin reads. */
+export interface SlackFile {
+  id?: string;
+  name?: string;
+  title?: string;
+  permalink?: string;
+  mimetype?: string;
+  /** Needs the token (files:read) to download. */
+  url_private?: string;
+  url_private_download?: string;
+  size?: number;
+  /** "hidden_by_limit" on plans that hide old files; such files have no URLs. */
+  mode?: string;
 }
 
 export interface AuthInfo {

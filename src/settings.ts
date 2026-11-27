@@ -28,6 +28,8 @@ export interface SlackFlavorSettings {
   /** Size limit for locally cached emoji images; 0 turns the cache off. */
   emojiCacheMB: number;
   importFormat: ImportFormat;
+  /** Download images attached to imported messages into the vault (needs files:read). */
+  importImages: boolean;
 }
 
 export const DEFAULT_SETTINGS: SlackFlavorSettings = {
@@ -39,6 +41,7 @@ export const DEFAULT_SETTINGS: SlackFlavorSettings = {
   emojiRefreshDays: 7,
   emojiCacheMB: 50,
   importFormat: "block",
+  importImages: false,
 };
 
 /** Frontmatter property that picks the workspace for a note. */

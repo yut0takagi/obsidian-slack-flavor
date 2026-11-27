@@ -7,6 +7,7 @@
  *
  *   @田中 10:30                <- message header: at the top or after a blank line
  *   body in Slack mrkdwn
+ *   ![[slack-F0123.png]]       <- an image saved in the vault, on a line of its own
  *   +:tada: 3 :eyes:           <- trailing reaction lines
  *
  *   ↳ @山田 10:32              <- "↳" or ">>" marks a thread reply
@@ -47,6 +48,8 @@ export interface SlackBlock {
 }
 
 const META = /^(workspace|channel|title|source)\s*:\s*(.*)$/i;
+/** `![[name.png]]` or `![[name.png|300]]` alone on a line; the link text never contains ] | # ^ or a newline. */
+const IMAGE_EMBED = /^\s*!\[\[([^\]|#^\n]+?)(?:\|[^\]\n]*)?\]\]\s*$/;
 const TIME = String.raw`(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+)?\d{1,2}:\d{2}`;
 const HEADER = new RegExp(String.raw`^(?:(↳|>>)\s*)?@(.+?)(?:\s+(${TIME}))?\s*$`);
 const REACTION_EMOJI = String.raw`:${EMOJI_NAME}:(?::skin-tone-[2-6]:)?`;
@@ -124,4 +127,21 @@ function trimBlankLines(lines: string[]): string[] {
   while (a < b && !lines[a].trim()) a++;
   while (b > a && !lines[b - 1].trim()) b--;
   return lines.slice(a, b);
+}
+
+/** A message body split into its mrkdwn and the images embedded on lines of their own (in order). */
+export function splitImageEmbeds(body: string): { text: string; images: string[] } {
+  const text: string[] = [];
+  const images: string[] = [];
+  for (const line of body.split("\n")) {
+    const link = imageEmbedLink(line);
+    if (link) images.push(link);
+    else text.push(line);
+  }
+  return { text: text.join("\n"), images };
+}
+
+/** The link text of a line that is only an image embed, or null. */
+export function imageEmbedLink(line: string): string | null {
+  return IMAGE_EMBED.exec(line)?.[1].trim() ?? null;
 }
