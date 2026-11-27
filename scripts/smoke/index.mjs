@@ -18,6 +18,8 @@ import { createSandbox, PLUGIN_ID } from "./sandbox.mjs";
 const LAUNCH_MS = 90_000;
 const STEP_MS = 20_000;
 const PHONE = { width: 390, height: 844, deviceScaleFactor: 2, mobile: true };
+// A 48×32 PNG, the same bytes as tests/smoke/vault/slack-F0SMOKE1.png.
+const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAAN0lEQVR4nO3OQQ0AMAgEMExgivn3MxccjyYV0Jp+p1R8ICQkJJQeCAkJCaUHQkJCQumBkJDQsg/p0/wumd6ArgAAAABJRU5ErkJggg==";
 const pluginDir = process.env.SMOKE_PLUGIN_DIR || fileURLToPath(new URL("../../", import.meta.url));
 const passes = (process.env.SMOKE_PASSES || "desktop,mobile").split(",").map((p) => p.trim());
 const screenshotDir = process.env.SMOKE_SCREENSHOTS || null;
@@ -129,11 +131,16 @@ const steps = [
   {
     name: "show emoji in live preview",
     async run(session) {
-      const n = await session.cdp.evaluate(
-        page(`return await until(() => noteLeaf().view.editor.cm.contentDOM.querySelectorAll(".sf-emoji").length, 5000);`),
+      const r = await session.cdp.evaluate(
+        page(`
+          const dom = noteLeaf().view.editor.cm.contentDOM;
+          const count = () => ({ emoji: dom.querySelectorAll(".sf-emoji").length, images: dom.querySelectorAll("img.sf-attachment[src]").length });
+          await until(() => count().emoji && count().images, 5000);
+          return count();
+        `),
         STEP_MS,
       );
-      expect(n > 0, "no emoji in live preview");
+      expect(r.emoji > 0 && r.images === 1, `live preview: ${JSON.stringify(r)}`);
       await screenshot(session, "1-live-preview");
     },
   },
@@ -144,15 +151,19 @@ const steps = [
         page(`
           await setMode("preview");
           const el = noteLeaf().view.previewMode.containerEl;
-          const count = () => ({ blocks: el.querySelectorAll(".sf-block").length, emoji: el.querySelectorAll(".sf-emoji").length });
-          await until(() => count().blocks && count().emoji, 5000);
+          const count = () => ({
+            blocks: el.querySelectorAll(".sf-block").length,
+            emoji: el.querySelectorAll(".sf-emoji").length,
+            images: el.querySelectorAll("img.sf-attachment[src]").length,
+          });
+          await until(() => count().blocks && count().emoji && count().images, 5000);
           return count();
         `),
         STEP_MS,
       );
       await screenshot(session, "2-reading");
       await session.cdp.evaluate(page(`await setMode("source"); return 0;`), STEP_MS);
-      expect(r.blocks > 0 && r.emoji > 0, `reading view: ${JSON.stringify(r)}`);
+      expect(r.blocks > 0 && r.emoji > 0 && r.images === 1, `reading view: ${JSON.stringify(r)}`);
     },
   },
   {
@@ -323,6 +334,41 @@ const steps = [
           STEP_MS,
         );
       }
+    },
+  },
+  {
+    name: "save an attached image into the vault (Slack's download stubbed)",
+    async run({ cdp }) {
+      // Only the download is replaced: naming, the checks, the attachment path and the vault write are real.
+      const r = await cdp.evaluate(
+        page(`
+          const p = plugin();
+          const original = p.fileFetch;
+          const png = Uint8Array.from(atob(${JSON.stringify(PNG_BASE64)}), (c) => c.charCodeAt(0)).buffer;
+          const asked = [];
+          p.fileFetch = async (url) => {
+            asked.push(url);
+            return { status: 200, contentType: "image/png", data: png };
+          };
+          try {
+            const file = { id: "F0SMOKE2", name: "shot.png", mimetype: "image/png", url_private: "https://files.slack.com/files-pri/T0-F0SMOKE2/shot.png", size: png.byteLength };
+            const failures = [];
+            const first = await p.saveSlackImage(file, "not-a-token", "Emoji.md", failures);
+            const again = await p.saveSlackImage(file, "not-a-token", "Emoji.md", failures);
+            const elsewhere = await p.saveSlackImage({ ...file, id: "F0SMOKE3", url_private: "https://example.com/x.png" }, "not-a-token", "Emoji.md", failures);
+            const saved = first ? app.metadataCache.getFirstLinkpathDest(first, "Emoji.md") : null;
+            const bytes = saved ? (await app.vault.readBinary(saved)).byteLength : 0;
+            return { first, again, elsewhere, path: saved?.path ?? null, bytes, expected: png.byteLength, downloads: asked, failures };
+          } finally {
+            p.fileFetch = original;
+          }
+        `),
+        STEP_MS,
+      );
+      expect(r.first === "slack-F0SMOKE2.png" && r.path === "slack-F0SMOKE2.png", `saved as ${JSON.stringify(r.first)} at ${JSON.stringify(r.path)}`);
+      expect(r.bytes === r.expected, `saved ${r.bytes} bytes, expected ${r.expected}`);
+      expect(r.again === r.first && r.downloads.length === 1, `second save: ${JSON.stringify(r.again)}, downloads ${JSON.stringify(r.downloads)}`);
+      expect(r.elsewhere === null && r.failures.length === 0, `non-Slack URL: ${JSON.stringify(r.elsewhere)}, failures ${JSON.stringify(r.failures)}`);
     },
   },
   {
