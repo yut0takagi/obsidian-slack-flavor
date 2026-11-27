@@ -30,6 +30,8 @@ export interface SlackFlavorSettings {
   importFormat: ImportFormat;
   /** Download images attached to imported messages into the vault (needs files:read). */
   importImages: boolean;
+  /** Offer the post and scheduled-messages commands (posting cannot be undone, so it is opt-in). */
+  allowPosting: boolean;
 }
 
 export const DEFAULT_SETTINGS: SlackFlavorSettings = {
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: SlackFlavorSettings = {
   emojiCacheMB: 50,
   importFormat: "block",
   importImages: false,
+  allowPosting: false,
 };
 
 /** Frontmatter property that picks the workspace for a note. */

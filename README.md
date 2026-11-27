@@ -80,9 +80,10 @@ The workspace used for emoji is chosen in this order:
          - channels:read
          - groups:read
          - files:read
+         - chat:write
    ```
 
-   Only `emoji:read` is needed if you do not import threads, and `files:read` only to save attached images. Your workspace may require admin approval to install apps.
+   Only `emoji:read` is needed if you do not import threads, `files:read` only to save attached images, and `chat:write` only to post. Your workspace may require admin approval to install apps.
 2. **Install to Workspace**, then copy the **User OAuth Token** (`xoxp-…`).
 3. In Obsidian: **Settings → Slack Flavor → Add workspace**, give it a name, click the token field and create a secret with the token, then **Fetch emoji**.
 
@@ -141,9 +142,18 @@ Attached files are listed as links. Turn on **Save attached images** (under **Im
 
 To update an imported block with new replies and reactions, click **Refresh** in the block's header (next to **Open in Slack**), or put the cursor inside it and run **Refresh Slack thread in block**. The plugin first shows the workspace, channel and thread date it is about to read and only fetches after you confirm; a block whose `source:` link is not on the selected workspace's domain is refused. The block is rewritten from Slack, keeping its `workspace:` and `title:` lines; anything else you edited inside it is replaced. Blocks imported before 0.2.0 have no `source:` line; import them again to make them refreshable.
 
+## Posting to Slack (optional)
+
+Off by default. Turn on **Allow posting to Slack** (under **Posting**, needs `chat:write`) to get two commands:
+
+- **Post selection or note to Slack…** converts the selection (or the whole note) the same way as the plain-text copy, then asks where: one of your channels, or **Reply in a thread…** with a message link (it must be on the note's workspace). A confirmation shows the workspace, the destination and the exact text before anything is sent, and warns when it would notify people (`<!here>`, `<!channel>`, `<!everyone>`, user or group mentions). Turn on **Schedule** there to send it later (from a minute to 120 days ahead).
+- **Show scheduled Slack messages** lists what you scheduled this way and can unschedule it.
+
+Messages are posted as you and cannot be taken back. If the connection fails after sending, the plugin says the message may already be posted instead of offering to send it again.
+
 ## Network use and privacy
 
-- Requests with your token go only to `https://slack.com/api/` (`auth.test`, `emoji.list`, `conversations.replies`, `conversations.info`, `users.info`): when you fetch emoji, import or refresh a thread, and at startup for emoji lists older than the refresh interval.
+- Requests with your token go only to `https://slack.com/api/` (`auth.test`, `emoji.list`, `conversations.replies`, `conversations.info`, `users.info`; with posting allowed, `users.conversations`, `chat.postMessage`, `chat.scheduleMessage`, `chat.scheduledMessages.list`, `chat.deleteScheduledMessage`, `chat.getPermalink`): when you fetch emoji, import or refresh a thread, and at startup for emoji lists older than the refresh interval.
 - With **Save attached images** on, images attached to imported messages are downloaded from `https://files.slack.com` with your token: only URLs that Slack's API returned for those messages, and the download refuses any other host.
 - Custom emoji images are loaded from the URLs Slack returns (`emoji.slack-edge.com`). The first time an image is displayed, the plugin also downloads it once with a plain request (no token or other credentials) and saves it in `<vault>/.obsidian/plugins/slack-flavor/emoji-cache/` (inside your configuration folder, not among your notes). From then on it is shown from that copy. Only images are stored there, under hashed file names.
 - Nothing is sent anywhere else. There is no telemetry.
@@ -177,6 +187,7 @@ Obsidian で Slack の書式を書いてプレビューし、ワークスペー�
 - ワークスペースを登録すると、そのカスタム絵文字（`:承知:` など）をブロック・閲覧モード・ライブプレビューで画像表示します。`:` のあとに2文字打つと候補が出ます
 - ノートや選択範囲を Slack 用の書式に変換してコピーします。日本語に隣接する装飾記号には半角スペースを補います
 - Slack のメッセージリンクからスレッドを取り込み、```` ```slack ```` ブロック（または Markdown のコールアウト）として挿入します。取り込んだブロックは、見出しの「再取得」ボタンか **Refresh Slack thread in block** コマンドで、最新の返信・リアクションに更新できます。設定の「添付画像を保管庫に保存」をオンにすると（files:read スコープが必要）、添付画像もノートの添付ファイルとして保存して表示します
+- 設定の「Slackへの投稿を許可」をオンにすると（chat:write スコープが必要）、選択範囲やノートをチャンネルやスレッドに投稿・予約投稿できます。送る前に投稿先と本文をそのまま表示し、@here やメンションで通知が届く場合は警告します
 - 絵文字の一覧は一定期間（既定 7 日）ごとに起動時に自動で更新します。一度表示した絵文字の画像はプラグインのフォルダに保存し、オフラインでも表示します
 - ブロック内のメンション（`<@U123|name>`）は書式付きコピーでは「@name」という文字になり、Slack に貼ってもメンションにはなりません
 

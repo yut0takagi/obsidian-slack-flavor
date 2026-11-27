@@ -407,3 +407,33 @@ img.sf-emoji {
   border-radius: 6px;
   object-fit: contain;
 }
+
+/* ---------- posting ---------- */
+
+.sf-post-preview {
+  max-height: 240px;
+  overflow: auto;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sf-post-warning {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--color-orange);
+  border-radius: 4px;
+  background: var(--background-modifier-hover);
+  font-weight: 600;
+}
+
+.sf-post-error {
+  min-height: 1.2em;
+  color: var(--text-error);
+}

@@ -135,3 +135,65 @@ describe("SlackClient", () => {
     expect(await client.channelName("C404")).toBeUndefined();
   });
 });
+
+describe("SlackClient posting", () => {
+  it("lists the channels the user is in, following cursors", async () => {
+    const { http, calls } = fakeHttp([
+      ok({ channels: [{ id: "C1", name: "general" }, { id: "G2", name: "secret", is_private: true }], response_metadata: { next_cursor: "n" } }),
+      ok({ channels: [{ id: "C3", name: "random" }], response_metadata: { next_cursor: "" } }),
+    ]);
+    const channels = await new SlackClient("t", http).memberChannels();
+    expect(channels).toEqual([
+      { id: "C1", name: "general", private: false },
+      { id: "G2", name: "secret", private: true },
+      { id: "C3", name: "random", private: false },
+    ]);
+    expect(calls[0].url).toBe("https://slack.com/api/users.conversations");
+    expect(calls[0].body).toBe("types=public_channel%2Cprivate_channel&exclude_archived=true&limit=200");
+    expect(calls[1].body).toBe("types=public_channel%2Cprivate_channel&exclude_archived=true&limit=200&cursor=n");
+  });
+
+  it("posts a message, in a thread when given one", async () => {
+    const { http, calls } = fakeHttp([ok({ channel: "C1", ts: "1.5" }), ok({ channel: "C1", ts: "1.6" })]);
+    const client = new SlackClient("t", http);
+    await expect(client.postMessage("C1", "hi *there* & you")).resolves.toEqual({ channel: "C1", ts: "1.5" });
+    await client.postMessage("C1", "reply", "1.0");
+    expect(calls[0].url).toBe("https://slack.com/api/chat.postMessage");
+    expect(calls[0].body).toBe("channel=C1&text=hi%20*there*%20%26%20you");
+    expect(calls[1].body).toBe("channel=C1&text=reply&thread_ts=1.0");
+  });
+
+  it("never retries a post after a network error, so it cannot be sent twice", async () => {
+    const http = vi.fn(async () => {
+      throw new Error("socket hang up");
+    });
+    await expect(new SlackClient("t", http).postMessage("C1", "x")).rejects.toThrow("socket hang up");
+    expect(http).toHaveBeenCalledTimes(1);
+  });
+
+  it("schedules, lists and deletes scheduled messages", async () => {
+    const { http, calls } = fakeHttp([
+      ok({ scheduled_message_id: "Q1", post_at: 1900000000, channel: "C1" }),
+      ok({ scheduled_messages: [{ id: "Q1", channel_id: "C1", post_at: 1900000000, text: "later" }], response_metadata: { next_cursor: "" } }),
+      ok({}),
+    ]);
+    const client = new SlackClient("t", http);
+    await expect(client.scheduleMessage("C1", "later", 1900000000, "1.0")).resolves.toEqual({ id: "Q1", postAt: 1900000000 });
+    await expect(client.scheduledMessages()).resolves.toEqual([{ id: "Q1", channel: "C1", postAt: 1900000000, text: "later" }]);
+    await client.deleteScheduledMessage("C1", "Q1");
+    expect(calls.map((c) => c.url.replace("https://slack.com/api/", ""))).toEqual([
+      "chat.scheduleMessage",
+      "chat.scheduledMessages.list",
+      "chat.deleteScheduledMessage",
+    ]);
+    expect(calls[0].body).toBe("channel=C1&text=later&post_at=1900000000&thread_ts=1.0");
+    expect(calls[2].body).toBe("channel=C1&scheduled_message_id=Q1");
+  });
+
+  it("returns a message's permalink, or undefined when Slack cannot give one", async () => {
+    const { http } = fakeHttp([ok({ permalink: "https://acme.slack.com/archives/C1/p15" }), { status: 200, headers: {}, json: { ok: false, error: "message_not_found" } }]);
+    const client = new SlackClient("t", http);
+    expect(await client.permalink("C1", "1.5")).toBe("https://acme.slack.com/archives/C1/p15");
+    expect(await client.permalink("C1", "9.9")).toBeUndefined();
+  });
+});

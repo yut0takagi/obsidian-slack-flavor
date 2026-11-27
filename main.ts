@@ -4,6 +4,7 @@ import { parseSlackBlock } from "./src/block/parse";
 import { renderSlackBlock } from "./src/block/render";
 import { slackClipboardData } from "./src/convert/clipboardData";
 import { markdownToSlackDoc, mrkdwnToSlackDoc, type SlackLine } from "./src/convert/slackDoc";
+import { slackDocToMrkdwn } from "./src/convert/mdToMrkdwn";
 import { slackBlockToMarkdown } from "./src/convert/toMarkdown";
 import { refreshStaleEmoji } from "./src/emoji/autoRefresh";
 import { resolveEmoji, withImageUrl, type CustomEmojiMap, type EmojiResolver } from "./src/emoji/resolver";
@@ -25,12 +26,14 @@ import {
   type SlackFlavorSettings,
   type WorkspaceConfig,
 } from "./src/settings";
-import { SlackApiError, SlackClient, type SlackFile } from "./src/slack/client";
+import { type HttpFn, SlackApiError, SlackClient, type SlackChannel, type SlackFile } from "./src/slack/client";
+import { checkPostText } from "./src/slack/post";
+import { askThreadLink, ConfirmPostModal, type Destination, DestinationModal, ScheduledModal } from "./src/obsidian/postModals";
 import { checkImageResponse, type FileFetch, imageDownloadUrl, imageFileName } from "./src/slack/files";
 import { describeError } from "./src/slack/errors";
 import { parsePermalink, threadPermalink } from "./src/slack/permalink";
 import { checkRefreshSource, refreshSummary } from "./src/slack/refresh";
-import { formatSlackBlock, threadToBlock, threadToSlackBlock } from "./src/slack/toBlock";
+import { formatSlackBlock, formatTs, threadToBlock, threadToSlackBlock } from "./src/slack/toBlock";
 import { EmojiStore } from "./src/store/emojiStore";
 import { EmojiImageCache } from "./src/store/imageCache";
 
@@ -57,6 +60,8 @@ export default class SlackFlavorPlugin extends Plugin {
   imageCache!: EmojiImageCache;
   /** Downloads Slack files with the token; a field so the smoke test can answer for Slack. */
   fileFetch: FileFetch = obsidianFileFetch;
+  /** Calls Slack's Web API; a field so the smoke test can answer for Slack. */
+  http: HttpFn = obsidianHttp;
   private statusBar: HTMLElement | null = null;
 
   override async onload(): Promise<void> {
@@ -101,6 +106,25 @@ export default class SlackFlavorPlugin extends Plugin {
       editorCallback: (editor, view) => void this.refreshThread(editor, view.file),
     });
     this.addCommand({ id: "switch-workspace", name: s.cmdSwitch, callback: () => this.chooseDefaultWorkspace() });
+    // Posting cannot be undone, so its commands only exist once it is allowed in the settings.
+    this.addCommand({
+      id: "post-to-slack",
+      name: s.cmdPost,
+      editorCheckCallback: (checking, editor, view) => {
+        if (!this.settings.allowPosting) return false;
+        if (!checking) void this.postToSlack(editor, view.file);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "scheduled-messages",
+      name: s.cmdScheduled,
+      checkCallback: (checking) => {
+        if (!this.settings.allowPosting) return false;
+        if (!checking) void this.showScheduled();
+        return true;
+      },
+    });
     this.addCommand({ id: "refresh-emoji", name: s.cmdRefresh, callback: () => this.refreshAllEmoji() });
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor) => {
@@ -156,7 +180,7 @@ export default class SlackFlavorPlugin extends Plugin {
 
   /** Saves the list only after both calls succeed, so a failed fetch keeps the previous list. */
   private async downloadEmoji(workspace: WorkspaceConfig, token: string): Promise<void> {
-    const client = new SlackClient(token, obsidianHttp);
+    const client = this.client(token);
     const auth = await client.authTest();
     const emoji = await client.emojiList();
     await this.store.save(workspace.id, emoji);
@@ -256,7 +280,7 @@ export default class SlackFlavorPlugin extends Plugin {
       }
       const notice = new Notice(this.strings.importing, 0);
       try {
-        const client = new SlackClient(token, obsidianHttp);
+        const client = this.client(token);
         const messages = await client.replies(permalink.channel, permalink.threadTs ?? permalink.ts);
         const rootTs = messages[0]?.thread_ts ?? messages[0]?.ts ?? permalink.threadTs ?? permalink.ts;
         // app.slack.com links work only in the browser client; prefer the workspace's own domain.
@@ -370,7 +394,7 @@ export default class SlackFlavorPlugin extends Plugin {
       return null;
     }
 
-    const client = new SlackClient(token, obsidianHttp);
+    const client = this.client(token);
     // Only the channel's name is looked up before the user agrees; it is shown in the dialog, not written anywhere.
     const channelName = await client.channelName(permalink.channel);
     if (!(await confirmRefresh(this.app, s, refreshSummary(workspace, permalink, channelName)))) return null;
@@ -432,6 +456,140 @@ export default class SlackFlavorPlugin extends Plugin {
 
   private reportImageFailures(failures: ImageFailures): void {
     if (failures.length) new Notice(this.strings.imagesNotSaved(failures.length, failures.includes("login")), 8000);
+  }
+
+  // --- posting ----------------------------------------------------------------
+
+  /** Posts the selection (or the whole note) as Slack mrkdwn, after the user picks where and confirms. */
+  private async postToSlack(editor: Editor, file: TFile | null): Promise<void> {
+    const s = this.strings;
+    const source = editor.somethingSelected() ? editor.getSelection() : editor.getValue();
+    // The same conversion as the plain-text copy, so what is shown is what is sent.
+    const text = slackDocToMrkdwn(markdownToSlackDoc(source), { spaceAroundMarkers: this.settings.spaceAroundMarkers });
+    const problem = checkPostText(text);
+    if (problem) {
+      new Notice(problem === "empty" ? s.postEmpty : s.postTooLong);
+      return;
+    }
+    const workspace = this.workspaceForPath(file?.path ?? "");
+    if (!workspace) {
+      new Notice(s.noWorkspace);
+      return;
+    }
+    const token = this.tokenFor(workspace);
+    if (!token) {
+      new Notice(s.noToken(workspace.name));
+      return;
+    }
+    const client = this.client(token);
+    let channels: SlackChannel[] = [];
+    try {
+      channels = await client.memberChannels();
+    } catch (err) {
+      new Notice(s.postChannelsFailed(describeError(err, s)));
+    }
+    new DestinationModal(this.app, s, channels, (d) => void this.confirmPost(client, workspace, d, text)).open();
+  }
+
+  private async confirmPost(client: SlackClient, workspace: WorkspaceConfig, destination: Destination, text: string): Promise<void> {
+    const s = this.strings;
+    let channel: string;
+    let threadTs: string | undefined;
+    let label: string;
+    if (destination.kind === "channel") {
+      channel = destination.channel.id;
+      label = `${destination.channel.private ? "🔒 " : "#"}${destination.channel.name}`;
+    } else {
+      const link = await askThreadLink(this.app, s);
+      if (!link) return;
+      const permalink = parsePermalink(link);
+      if (!permalink) {
+        new Notice(s.badLink);
+        return;
+      }
+      // The link is pasted text: it must be on the workspace whose token posts.
+      const check = checkRefreshSource(permalink, workspace);
+      if (!check.ok) {
+        new Notice(check.reason === "unknown-domain" ? s.refreshUnknownDomain(workspace.name) : s.refreshOtherWorkspace(check.host, workspace.name));
+        return;
+      }
+      channel = permalink.channel;
+      threadTs = permalink.threadTs ?? permalink.ts;
+      const name = await client.channelName(channel);
+      label = s.postThreadIn(name ? `#${name}` : channel, formatTs(threadTs));
+    }
+    const summary = { workspace: workspace.domain ? `${workspace.name} (${workspace.domain})` : workspace.name, destination: label, text };
+    new ConfirmPostModal(this.app, s, summary, async (postAt) => {
+      try {
+        if (postAt !== undefined) {
+          await client.scheduleMessage(channel, text, postAt, threadTs);
+          new Notice(s.postScheduled(label, new Date(postAt * 1000).toLocaleString()), 8000);
+        } else {
+          const posted = await client.postMessage(channel, text, threadTs);
+          this.noticeWithLink(s.posted(label), await client.permalink(posted.channel, posted.ts));
+        }
+        return true;
+      } catch (err) {
+        // Slack refused: nothing was sent, so the dialog stays open to try again. Anything else (the
+        // connection failed) may have happened after Slack posted it: close and say so instead.
+        if (err instanceof SlackApiError) {
+          new Notice(describeError(err, s));
+          return false;
+        }
+        new Notice(s.postUncertain, 0);
+        return true;
+      }
+    }).open();
+  }
+
+  private async showScheduled(): Promise<void> {
+    const s = this.strings;
+    const workspace = this.workspaceForPath(this.app.workspace.getActiveFile()?.path ?? "");
+    if (!workspace) {
+      new Notice(s.noWorkspace);
+      return;
+    }
+    const token = this.tokenFor(workspace);
+    if (!token) {
+      new Notice(s.noToken(workspace.name));
+      return;
+    }
+    const client = this.client(token);
+    try {
+      const messages = await client.scheduledMessages();
+      const names = new Map<string, string | undefined>();
+      for (const m of messages) if (!names.has(m.channel)) names.set(m.channel, await client.channelName(m.channel));
+      const items = messages.map((message) => ({ message, channel: names.get(message.channel) ? `#${names.get(message.channel)}` : message.channel }));
+      new ScheduledModal(this.app, s, items, async (message) => {
+        try {
+          await client.deleteScheduledMessage(message.channel, message.id);
+          new Notice(s.scheduledRemoved);
+          return true;
+        } catch (err) {
+          new Notice(describeError(err, s));
+          return false;
+        }
+      }).open();
+    } catch (err) {
+      new Notice(describeError(err, s));
+    }
+  }
+
+  private noticeWithLink(message: string, link: string | undefined): void {
+    new Notice(
+      createFragment((f) => {
+        f.appendText(message);
+        if (link && /^https:\/\/[a-z0-9.-]+\.slack\.com\//i.test(link)) {
+          f.appendText(" ");
+          f.createEl("a", { text: this.strings.openInSlack, href: link });
+        }
+      }),
+      8000,
+    );
+  }
+
+  private client(token: string): SlackClient {
+    return new SlackClient(token, this.http);
   }
 
   // --- plumbing -------------------------------------------------------------

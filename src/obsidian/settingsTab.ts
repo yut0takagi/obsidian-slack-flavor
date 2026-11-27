@@ -76,6 +76,9 @@ export class SlackFlavorSettingTab extends PluginSettingTab {
           }),
       );
     this.toggle(s.settingsImportImages, s.settingsImportImagesDesc, "importImages");
+
+    new Setting(containerEl).setName(s.settingsPosting).setHeading();
+    this.toggle(s.settingsAllowPosting, s.settingsAllowPostingDesc, "allowPosting");
   }
 
   private cacheSetting(): void {
@@ -163,7 +166,7 @@ export class SlackFlavorSettingTab extends PluginSettingTab {
       );
   }
 
-  private toggle(name: string, desc: string, key: "strictBoundaries" | "renderEmojiInNotes" | "spaceAroundMarkers" | "importImages"): void {
+  private toggle(name: string, desc: string, key: "strictBoundaries" | "renderEmojiInNotes" | "spaceAroundMarkers" | "importImages" | "allowPosting"): void {
     new Setting(this.containerEl)
       .setName(name)
       .setDesc(desc)
